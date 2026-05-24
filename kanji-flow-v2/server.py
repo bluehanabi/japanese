@@ -939,6 +939,100 @@ def ai_pregenerate():
     return jsonify({"ok": True})
 
 
+@app.route("/api/writing_cards")
+def writing_cards():
+    """쓰기 연습용 한자 카드 (학습 범위, SRS 순서: 복습예정 우선 → 신규)."""
+    today = date.today().isoformat()
+    daily = int(get_setting("daily_new_cards", "10"))
+    cond, params = _level_scope()
+    conn = get_db()
+    rows = conn.execute(f"""
+        SELECT c.*, r.ease_factor, r.interval, r.repetitions, r.next_review,
+               r.total_reviews, r.correct_count
+        FROM cards c JOIN reviews r ON r.card_id = c.id
+        WHERE c.type = 'kanji' AND {cond}
+        ORDER BY (r.next_review <= ? AND r.repetitions > 0) DESC,
+                 (r.repetitions = 0) DESC, r.next_review ASC, RANDOM()
+        LIMIT ?
+    """, params + [today, max(daily, 10)]).fetchall()
+    conn.close()
+
+    def to_dict(row):
+        d = dict(row)
+        if d.get("extra_info"):
+            try: d["extra_info"] = json.loads(d["extra_info"])
+            except: pass
+        d["state"] = get_card_state(d["repetitions"], d["interval"])
+        return d
+    return jsonify({"cards": [to_dict(r) for r in rows]})
+
+
+# 점수(0~100) → SRS 평가 버튼 매핑
+def _score_to_rating(score):
+    if score < 40:  return "again"
+    if score < 66:  return "hard"
+    if score < 86:  return "good"
+    return "easy"
+
+
+@app.route("/api/ai/score_writing", methods=["POST"])
+def ai_score_writing():
+    """그린 한자 이미지를 Gemini 비전으로 채점 → 점수·판정 반환."""
+    data = request.get_json() or {}
+    card_id = data.get("card_id")
+    image = data.get("image", "")
+    if "," in image:
+        image = image.split(",", 1)[1]   # data:image/png;base64, 제거
+    if not image:
+        return jsonify({"error": "이미지가 없어요."}), 400
+
+    conn = get_db()
+    row = conn.execute("SELECT front, back_meaning FROM cards WHERE id = ?", (card_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "카드를 찾을 수 없어요."}), 404
+    target, meaning = row["front"], row["back_meaning"]
+
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+
+    prompt = (
+        f"이미지는 학습자가 손으로 쓴 일본어 한자야. 목표 한자는 '{target}'({meaning})야. "
+        f"목표 한자를 올바른 모양으로 썼는지 평가해줘. JSON으로만 답해: "
+        '{"recognized":"인식한자","correct":true/false,"score":0~100,"feedback":"한국어 한줄 피드백"}. '
+        "score는 목표 한자와의 일치도/완성도(0~100). 다른 한자거나 알아볼 수 없으면 낮게."
+    )
+    import urllib.request
+    payload = {
+        "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/png", "data": image}}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+        out = json.loads(res["candidates"][0]["content"]["parts"][0]["text"])
+    except Exception as e:
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            return jsonify({"error": f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}), 502
+        return jsonify({"error": f"채점 실패: {e}"}), 502
+
+    score = int(out.get("score", 0))
+    score = max(0, min(100, score))
+    return jsonify({
+        "score": score,
+        "correct": bool(out.get("correct")),
+        "recognized": out.get("recognized", ""),
+        "feedback": out.get("feedback", ""),
+        "rating": _score_to_rating(score),
+    })
+
+
 @app.route("/api/ai/session_summary", methods=["POST"])
 def ai_session_summary():
     """학습 세션 종료 시 — AI 요약/조언을 만들고 session_log에 저장 (백데이터)."""

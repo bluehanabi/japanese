@@ -1800,3 +1800,29 @@ html, body {
 .sent-result.ng .sent-result-mark { color: #f87171; }
 .sent-result-jp { font-family: var(--font-jp); font-size: 18px; font-weight: 600; color: var(--text-primary); }
 .sent-result-kr { font-size: 14px; color: var(--text-secondary); margin-top: 4px; }
+
+/* ── 쓰기 연습 리뉴얼 (모드·AI 채점) ─────────────────── */
+.writing-modebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.writing-modebar .writing-nav-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 44px;
+  text-align: right;
+}
+.writing-result {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  animation: slideUp 0.2s var(--ease) both;
+}
+.writing-result.ok { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.4); }
+.writing-result.ng { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); }
+.wr-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.wr-rating { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.wr-score { font-size: 13px; font-weight: 700; color: var(--indigo); }
+.wr-feedback { font-size: 13px; line-height: 1.5; color: var(--text-secondary); }

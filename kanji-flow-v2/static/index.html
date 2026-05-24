@@ -58,7 +58,7 @@
         <span class="action-emoji">🎯</span>
         <span>랜덤 퀴즈</span>
       </button>
-      <button class="action-btn" onclick="openWritingFromHome()">
+      <button class="action-btn" onclick="startWritingPractice()">
         <span class="action-emoji">✍️</span>
         <span>쓰기 연습</span>
       </button>
@@ -576,20 +576,24 @@
         <div class="overlay-close" onclick="closeWriting()">✕</div>
       </div>
 
+      <div class="writing-modebar">
+        <div class="segment-control" style="flex:1">
+          <button class="seg-btn active" id="wmode-trace" onclick="setWriteMode('trace')">따라쓰기</button>
+          <button class="seg-btn" id="wmode-recall" onclick="setWriteMode('recall')">외워쓰기</button>
+        </div>
+        <div class="writing-nav-count" id="writing-count"></div>
+      </div>
+
       <div class="writing-canvas-wrap" id="writing-canvas"></div>
 
       <div class="writing-controls">
-        <button class="write-ctrl" id="wc-guide" onclick="toggleWriteGuide()">가이드 끄기</button>
         <button class="write-ctrl" id="wc-grid" onclick="toggleWriteGrid()">격자 끄기</button>
         <button class="write-ctrl danger" onclick="clearWriting()">지우기</button>
       </div>
 
-      <!-- 여러 글자 학습 시 다음/이전 -->
-      <div class="writing-nav" id="writing-nav" style="display:none">
-        <button class="write-nav-btn" onclick="writingPrev()">← 이전</button>
-        <div class="writing-nav-count" id="writing-count">1 / 1</div>
-        <button class="write-nav-btn" onclick="writingNext()">다음 →</button>
-      </div>
+      <div class="writing-result" id="writing-result" style="display:none"></div>
+
+      <button class="start-btn" id="writing-action" style="margin:14px 0 0" onclick="scoreWriting()">🤖 AI 채점</button>
     </div>
   </div>
 

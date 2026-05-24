@@ -116,6 +116,25 @@ class KanjiCanvas {
     this.drawCtx.clearRect(0, 0, this.w, this.h);
   }
 
+  // 사용자가 그린 게 있는지
+  isEmpty() {
+    const d = this.drawCtx.getImageData(0, 0, this.draw.width, this.draw.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) return false;
+    return true;
+  }
+
+  // 사용자 획만 흰 배경 위에 합성해 PNG dataURL 로 반환 (AI 채점용, 가이드 제외)
+  exportInk() {
+    const tmp = document.createElement("canvas");
+    tmp.width = this.draw.width;
+    tmp.height = this.draw.height;
+    const t = tmp.getContext("2d");
+    t.fillStyle = "#ffffff";
+    t.fillRect(0, 0, tmp.width, tmp.height);
+    t.drawImage(this.draw, 0, 0);
+    return tmp.toDataURL("image/png");
+  }
+
   renderBg() {
     const ctx = this.bgCtx;
     ctx.clearRect(0, 0, this.w, this.h);

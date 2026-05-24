@@ -33,6 +33,9 @@ const State = {
     canvas: null,
     showGuide: true,
     showGrid: true,
+    mode: "trace",   // 'trace'(따라쓰기) / 'recall'(외워쓰기)
+    srs: false,
+    correct: 0,
   },
   quiz: {
     questions: [],
@@ -796,19 +799,23 @@ async function saveSettings() {
 //  한자 쓰기 연습
 // ══════════════════════════════════════════════════════════
 
-function openWriting(cards, index = 0) {
-  if (!cards || cards.length === 0) {
-    showToast("연습할 카드가 없어요");
-    return;
-  }
+// 홈 '쓰기 연습' — 학습 범위 한자를 SRS 순서로 가져와 AI 채점 세션 시작
+async function startWritingPractice() {
+  const data = await apiFetch("/api/writing_cards");
+  const cards = data.cards || [];
+  if (!cards.length) { showToast("쓰기 연습할 한자가 없어요 (설정에서 한자 급수를 확인하세요)"); return; }
+  openWriting(cards, 0, true);
+}
+
+function openWriting(cards, index = 0, srs = false) {
+  if (!cards || cards.length === 0) { showToast("연습할 카드가 없어요"); return; }
   State.writing.cards = cards;
   State.writing.index = index;
+  State.writing.srs = srs;
+  State.writing.correct = 0;
+  if (!State.writing.mode) State.writing.mode = "trace";
 
   document.getElementById("writing-overlay").classList.add("open");
-  document.getElementById("writing-nav").style.display =
-    cards.length > 1 ? "flex" : "none";
-
-  // 캔버스는 오버레이가 보인 뒤 크기를 잡아야 정확함
   requestAnimationFrame(() => {
     if (!State.writing.canvas) {
       State.writing.canvas = new KanjiCanvas("writing-canvas");
@@ -826,25 +833,102 @@ function renderWritingCard() {
 
   document.getElementById("writing-meaning").textContent = card.back_meaning || card.front;
   document.getElementById("writing-reading").textContent = card.back_reading || "";
-  document.getElementById("writing-count").textContent = `${w.index + 1} / ${w.cards.length}`;
+  document.getElementById("writing-count").textContent =
+    w.cards.length > 1 ? `${w.index + 1} / ${w.cards.length}` : "";
+
+  // 결과/버튼 초기화
+  document.getElementById("writing-result").style.display = "none";
+  const btn = document.getElementById("writing-action");
+  btn.disabled = false;
+  btn.textContent = "🤖 AI 채점";
+  btn.onclick = scoreWriting;
+
+  // 모드 반영 (따라쓰기=가이드 보임 / 외워쓰기=가이드 숨김)
+  w.showGuide = (w.mode === "trace");
+  document.getElementById("wmode-trace").classList.toggle("active", w.mode === "trace");
+  document.getElementById("wmode-recall").classList.toggle("active", w.mode === "recall");
 
   if (w.canvas) {
     w.canvas.showGuide = w.showGuide;
     w.canvas.showGrid = w.showGrid;
-    w.canvas.setGuideKanji(card.front);
+    w.canvas.setGuideKanji(card.front);   // clear + 가이드 다시 그림
   }
+}
+
+function setWriteMode(mode) {
+  State.writing.mode = mode;
+  const w = State.writing;
+  w.showGuide = (mode === "trace");
+  document.getElementById("wmode-trace").classList.toggle("active", mode === "trace");
+  document.getElementById("wmode-recall").classList.toggle("active", mode === "recall");
+  if (w.canvas) w.canvas.toggleGuide(w.showGuide);
+}
+
+async function scoreWriting() {
+  const w = State.writing;
+  const card = w.cards[w.index];
+  if (!w.canvas || w.canvas.isEmpty()) { showToast("먼저 한자를 써주세요 ✍️"); return; }
+
+  const btn = document.getElementById("writing-action");
+  btn.disabled = true;
+  btn.textContent = "채점 중…";
+  const data = await apiFetch("/api/ai/score_writing", "POST",
+    { card_id: card.id, image: w.canvas.exportInk() });
+  btn.disabled = false;
+
+  if (data.error) {
+    btn.textContent = "🤖 다시 채점";
+    showWritingResult({ error: data.error });
+    return;
+  }
+
+  showWritingResult(data);
+  speak(cardTTSText(card));   // 채점 후 발음 재생
+
+  if (w.srs) {
+    apiFetch("/api/review", "POST", { card_id: card.id, answer: data.rating });  // SRS 자동 반영
+    if (data.rating === "good" || data.rating === "easy") w.correct++;
+    btn.textContent = (w.index >= w.cards.length - 1) ? "완료" : "다음 →";
+    btn.onclick = writingAdvance;
+  } else {
+    btn.textContent = "🤖 다시 채점";
+    btn.onclick = scoreWriting;
+  }
+}
+
+const RATING_LABEL = { again: "🔴 몰랐어요", hard: "🟠 힘들었어", good: "🟢 맞았어", easy: "💙 완벽해요" };
+
+function showWritingResult(data) {
+  const el = document.getElementById("writing-result");
+  el.style.display = "block";
+  if (data.error) {
+    el.className = "writing-result ng";
+    el.innerHTML = `<div class="wr-feedback">${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  const ok = data.rating === "good" || data.rating === "easy";
+  el.className = `writing-result ${ok ? "ok" : "ng"}`;
+  el.innerHTML = `
+    <div class="wr-head"><span class="wr-rating">${RATING_LABEL[data.rating] || ""}</span>
+      <span class="wr-score">${data.score}점</span></div>
+    <div class="wr-feedback">${escapeHtml(data.feedback || "")}</div>`;
+}
+
+function writingAdvance() {
+  const w = State.writing;
+  if (w.index >= w.cards.length - 1) {
+    showToast(`쓰기 연습 완료! 정답 ${w.correct}/${w.cards.length} ✍️`);
+    closeWriting();
+    loadHome();
+    return;
+  }
+  w.index++;
+  renderWritingCard();
 }
 
 function openWritingForCurrent() {
   const card = State.study.queue[State.study.index];
-  if (card) openWriting([card], 0);
-}
-
-async function openWritingFromHome() {
-  const data = await apiFetch("/api/cards?type=kanji&per_page=1000");
-  const cards = (data.cards || []);
-  if (!cards.length) { showToast("한자 카드를 불러오지 못했어요"); return; }
-  openWriting(cards, 0);
+  if (card) openWriting([card], 0, false);
 }
 
 function closeWriting() {
@@ -855,32 +939,12 @@ function clearWriting() {
   if (State.writing.canvas) State.writing.canvas.clear();
 }
 
-function toggleWriteGuide() {
-  State.writing.showGuide = !State.writing.showGuide;
-  if (State.writing.canvas) State.writing.canvas.toggleGuide(State.writing.showGuide);
-  document.getElementById("wc-guide").textContent =
-    State.writing.showGuide ? "가이드 끄기" : "가이드 켜기";
-  document.getElementById("wc-guide").classList.toggle("off", !State.writing.showGuide);
-}
-
 function toggleWriteGrid() {
   State.writing.showGrid = !State.writing.showGrid;
   if (State.writing.canvas) State.writing.canvas.toggleGrid(State.writing.showGrid);
   document.getElementById("wc-grid").textContent =
     State.writing.showGrid ? "격자 끄기" : "격자 켜기";
   document.getElementById("wc-grid").classList.toggle("off", !State.writing.showGrid);
-}
-
-function writingNext() {
-  const w = State.writing;
-  w.index = (w.index + 1) % w.cards.length;
-  renderWritingCard();
-}
-
-function writingPrev() {
-  const w = State.writing;
-  w.index = (w.index - 1 + w.cards.length) % w.cards.length;
-  renderWritingCard();
 }
 
 // ══════════════════════════════════════════════════════════
