@@ -55,7 +55,7 @@ def get_today_cards():
 
     # 빈 리스트 대비 기본값
     if not levels: levels = ["N5", "N4", "N3", "N2", "N1"]
-    if not categories: categories = ["자연", "사람", "행동", "감정", "일상", "지식", "일반"]
+    if not categories: categories = ["한자", "명사", "동사", "형용사", "부사", "기타", "문법"]
 
     conn = get_db()
 
@@ -75,6 +75,8 @@ def get_today_cards():
         type_filter = "AND c.type = 'kanji'"
     elif study_mode == "word_only":
         type_filter = "AND c.type = 'word'"
+    elif study_mode == "grammar_only":
+        type_filter = "AND c.type = 'grammar'"
 
     # 등급 & 카테고리 동적 조건 생성을 위해 플레이스홀더 준비
     level_placeholders = ",".join(["?"] * len(levels))
@@ -529,6 +531,19 @@ def analyze_lyrics():
 # ══════════════════════════════════════════════════════════
 #  API: 설정
 # ══════════════════════════════════════════════════════════
+
+@app.route("/api/categories")
+def get_categories():
+    """데이터에 존재하는 카테고리 목록 (설정 칩 동적 생성용)."""
+    conn = get_db()
+    rows = conn.execute("SELECT DISTINCT category FROM cards ORDER BY category").fetchall()
+    conn.close()
+    # 보기 좋은 순서로 정렬 (한자·품사·문법)
+    order = ["한자", "명사", "동사", "형용사", "부사", "기타", "문법"]
+    cats = [r["category"] for r in rows]
+    cats.sort(key=lambda x: order.index(x) if x in order else 99)
+    return jsonify({"categories": cats})
+
 
 @app.route("/api/settings", methods=["GET"])
 def get_settings():

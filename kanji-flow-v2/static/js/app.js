@@ -206,20 +206,23 @@ function showCard(index) {
   document.getElementById("study-progress").style.width = pct + "%";
   document.getElementById("study-progress-text").textContent = `${index} / ${total}`;
 
+  const TYPE_LABEL = { kanji: "한자", word: "단어", grammar: "문법" };
+
   // 카드 타입 배지
   const typeBadge = document.getElementById("study-type-badge");
-  typeBadge.textContent = card.type === "kanji" ? "한자" : "단어";
-  typeBadge.className = `card-type-badge ${card.type === "kanji" ? "badge-kanji" : "badge-word"}`;
+  typeBadge.textContent = TYPE_LABEL[card.type] || "단어";
+  typeBadge.className = `card-type-badge badge-${card.type}`;
 
   // 레벨 배지 (n5 ~ n1 동적 뱃지 색상 매핑)
   const levelBadge = document.getElementById("front-level-badge");
   levelBadge.textContent = card.jlpt_level;
   levelBadge.className = `card-type-badge badge-${card.jlpt_level.toLowerCase()}`;
 
-  // 앞면 텍스트
+  // 앞면 텍스트 (단어·문법은 글자가 길어 작게)
   const frontText = document.getElementById("card-front-text");
   frontText.textContent = card.front;
-  frontText.className = `card-main-text${card.type === "word" ? " word-text" : ""}`;
+  const longType = card.type === "word" ? " word-text" : card.type === "grammar" ? " grammar-text" : "";
+  frontText.className = `card-main-text${longType}`;
 
   // 설정: 앞면에 발음(읽기) 표시
   const frontReading = document.getElementById("card-front-reading");
@@ -231,15 +234,31 @@ function showCard(index) {
   }
 
   // 뒷면 준비
-  document.getElementById("card-back-kanji").textContent =
-    card.type === "word" ? card.front : card.front;
+  const backKanji = document.getElementById("card-back-kanji");
+  backKanji.textContent = card.front;
+  backKanji.className = `card-back-kanji${card.type === "grammar" ? " grammar-text" : ""}`;
   document.getElementById("card-back-meaning").textContent = card.back_meaning;
-  document.getElementById("card-back-reading").textContent = card.back_reading;
 
-  // 파생 단어 목록 (한자 카드만)
+  const backReading = document.getElementById("card-back-reading");
+  backReading.textContent = card.back_reading || "";
+  backReading.style.display = card.back_reading ? "" : "none";
+
+  // 쓰기 연습 버튼은 한자/단어만 (문법 제외)
+  document.getElementById("card-write-btn").style.display =
+    card.type === "grammar" ? "none" : "";
+
+  // 뒷면 부가 정보: 한자=파생단어 / 문법=예문
   const wordsEl = document.getElementById("card-back-words");
   wordsEl.innerHTML = "";
-  if (card.type === "kanji" && card.extra_info && Array.isArray(card.extra_info)) {
+  if (card.type === "grammar" && card.extra_info && Array.isArray(card.extra_info.examples)) {
+    card.extra_info.examples.forEach(ex => {
+      wordsEl.innerHTML += `
+        <div class="example-item">
+          <div class="ex-jp">${escapeHtml(ex.jp)}</div>
+          <div class="ex-kr">${escapeHtml(ex.kr)}</div>
+        </div>`;
+    });
+  } else if (card.type === "kanji" && card.extra_info && Array.isArray(card.extra_info)) {
     card.extra_info.forEach(w => {
       wordsEl.innerHTML += `
         <div class="word-item">
@@ -343,6 +362,7 @@ function setFilter(filter) {
     "all":            "chip-all",
     "kanji":          "chip-kanji",
     "word":           "chip-word",
+    "grammar":        "chip-grammar",
     "n5":             "chip-n5",
     "n4":             "chip-n4",
     "n3":             "chip-n3",
@@ -362,6 +382,7 @@ function applyFilter(cards, filter) {
   switch (filter) {
     case "kanji":          return cards.filter(c => c.type === "kanji");
     case "word":           return cards.filter(c => c.type === "word");
+    case "grammar":        return cards.filter(c => c.type === "grammar");
     case "n5":             return cards.filter(c => c.jlpt_level === "N5");
     case "n4":             return cards.filter(c => c.jlpt_level === "N4");
     case "n3":             return cards.filter(c => c.jlpt_level === "N3");
@@ -389,10 +410,10 @@ function renderCardList(cards) {
   }
 
   listEl.innerHTML = cards.map(card => {
-    const isKanji = card.type === "kanji";
+    const frontCls = card.type === "kanji" ? "" : card.type === "grammar" ? "grammar-front" : "word-front";
     return `
       <div class="card-list-item animate-in" onclick="openCardDetail(${card.id})">
-        <div class="card-list-kanji ${isKanji ? "" : "word-front"}">${card.front}</div>
+        <div class="card-list-kanji ${frontCls}">${escapeHtml(card.front)}</div>
         <div class="card-list-info">
           <div class="card-list-meaning">${card.back_meaning}</div>
           <div class="card-list-reading">${card.back_reading}</div>
@@ -416,10 +437,15 @@ function onSearch(query) {
 }
 
 function openCardDetail(id) {
-  // 단어장에서 카드를 누르면 해당 글자 쓰기 연습 열기
   const card = State.vocab.allCards.find(c => c.id === id)
             || (State.vocab.displayCards || []).find(c => c.id === id);
-  if (card) openWriting([card], 0);
+  if (!card) return;
+  if (card.type === "grammar") {
+    // 문법은 쓰기 연습 대신 의미/예문을 토스트로 안내
+    showToast(`${card.front} — ${card.back_meaning}`);
+    return;
+  }
+  openWriting([card], 0);   // 단어장에서 누르면 쓰기 연습
 }
 
 // ══════════════════════════════════════════════════════════
@@ -552,7 +578,7 @@ async function loadSettingsUI() {
   // 학습 모드 세그먼트
   const mode = s.study_mode || "both";
   document.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word" };
+  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word", grammar_only: "seg-grammar" };
   const el = document.getElementById(modeMap[mode]);
   if (el) el.classList.add("active");
 
@@ -575,16 +601,16 @@ async function loadSettingsUI() {
     }
   });
 
-  // 카테고리 활성화 복원
-  const categories = (s.active_categories || "자연,사람,행동,감정,일상,지식").split(",").map(x => x.trim()).filter(Boolean);
-  document.querySelectorAll("#settings-categories-wrap .select-chip").forEach(chip => {
-    const val = chip.id.replace("setting-category-", "");
-    if (categories.includes(val)) {
-      chip.classList.add("active");
-    } else {
-      chip.classList.remove("active");
-    }
-  });
+  // 카테고리 칩 동적 생성 + 활성화 복원 (데이터의 실제 카테고리 사용)
+  const activeCats = (s.active_categories || "").split(",").map(x => x.trim()).filter(Boolean);
+  const catData = await apiFetch("/api/categories");
+  const allCats = catData.categories || [];
+  const wrap = document.getElementById("settings-categories-wrap");
+  wrap.innerHTML = allCats.map(cat => {
+    const on = activeCats.length === 0 || activeCats.includes(cat);
+    return `<button class="select-chip${on ? " active" : ""}" id="setting-category-${cat}" onclick="toggleSettingCategory('${cat}')">${cat}</button>`;
+  }).join("");
+  if (activeCats.length === 0) State.settings.active_categories = allCats.join(",");
 
   // 총 카드
   document.getElementById("info-total-cards").textContent =
@@ -602,7 +628,7 @@ function changeNewCards(delta) {
 function setStudyMode(mode) {
   State.settings.study_mode = mode;
   document.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word" };
+  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word", grammar_only: "seg-grammar" };
   const el = document.getElementById(modeMap[mode]);
   if (el) el.classList.add("active");
 }
@@ -633,7 +659,7 @@ function toggleSettingLevel(level) {
 }
 
 function toggleSettingCategory(category) {
-  let categories = (State.settings.active_categories || "자연,사람,행동,감정,일상,지식").split(",").map(x => x.trim()).filter(Boolean);
+  let categories = (State.settings.active_categories || "").split(",").map(x => x.trim()).filter(Boolean);
   const chip = document.getElementById(`setting-category-${category}`);
   if (categories.includes(category)) {
     if (categories.length <= 1) {

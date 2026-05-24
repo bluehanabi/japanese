@@ -268,9 +268,10 @@
 
     <!-- 필터 칩 -->
     <div class="filter-chips">
-      <button class="chip active" id="chip-all"   onclick="setFilter('all')">전체</button>
-      <button class="chip"        id="chip-kanji" onclick="setFilter('kanji')">한자</button>
-      <button class="chip"        id="chip-word"  onclick="setFilter('word')">단어</button>
+      <button class="chip active" id="chip-all"     onclick="setFilter('all')">전체</button>
+      <button class="chip"        id="chip-kanji"   onclick="setFilter('kanji')">한자</button>
+      <button class="chip"        id="chip-word"    onclick="setFilter('word')">단어</button>
+      <button class="chip"        id="chip-grammar" onclick="setFilter('grammar')">문법</button>
       <button class="chip"        id="chip-n5"    onclick="setFilter('n5')">N5</button>
       <button class="chip"        id="chip-n4"    onclick="setFilter('n4')">N4</button>
       <button class="chip"        id="chip-n3"    onclick="setFilter('n3')">N3</button>
@@ -378,9 +379,10 @@
           <div class="settings-item-sub">한자만 / 단어만 / 모두</div>
         </div>
         <div class="segment-control">
-          <button class="seg-btn active" id="seg-both"  onclick="setStudyMode('both')">모두</button>
-          <button class="seg-btn"        id="seg-kanji" onclick="setStudyMode('kanji_only')">한자</button>
-          <button class="seg-btn"        id="seg-word"  onclick="setStudyMode('word_only')">단어</button>
+          <button class="seg-btn active" id="seg-both"    onclick="setStudyMode('both')">모두</button>
+          <button class="seg-btn"        id="seg-kanji"   onclick="setStudyMode('kanji_only')">한자</button>
+          <button class="seg-btn"        id="seg-word"    onclick="setStudyMode('word_only')">단어</button>
+          <button class="seg-btn"        id="seg-grammar" onclick="setStudyMode('grammar_only')">문법</button>
         </div>
       </div>
 
@@ -425,14 +427,7 @@
           <div class="settings-item-label">학습할 카테고리</div>
           <div class="settings-item-sub">원하는 단어 카테고리를 선택 (다중 선택)</div>
         </div>
-        <div class="multi-select-chips" id="settings-categories-wrap">
-          <button class="select-chip" id="setting-category-자연" onclick="toggleSettingCategory('자연')">자연</button>
-          <button class="select-chip" id="setting-category-사람" onclick="toggleSettingCategory('사람')">사람</button>
-          <button class="select-chip" id="setting-category-행동" onclick="toggleSettingCategory('행동')">행동</button>
-          <button class="select-chip" id="setting-category-감정" onclick="toggleSettingCategory('감정')">감정</button>
-          <button class="select-chip" id="setting-category-일상" onclick="toggleSettingCategory('일상')">일상</button>
-          <button class="select-chip" id="setting-category-지식" onclick="toggleSettingCategory('지식')">지식</button>
-        </div>
+        <div class="multi-select-chips" id="settings-categories-wrap"></div>
       </div>
     </div>
 
