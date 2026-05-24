@@ -365,6 +365,9 @@ async function saveSessionDigest(total, correct) {
   aiEl.style.display = "none";
   if (total === 0) return;
 
+  // 다음 '문장 연습'이 즉시 뜨도록 백그라운드로 문장 미리 생성 (대기 안 함)
+  apiFetch("/api/ai/pregenerate", "POST", {});
+
   const hasKey = !!(State.settings.gemini_api_key || "").trim();
   if (hasKey) {
     aiEl.style.display = "block";

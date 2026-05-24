@@ -84,6 +84,18 @@ def _create_schema(cur):
         )
     """)
 
+    # 문장 연습 캐시 (미리 생성해 두면 즉시 출제 = 백데이터)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sentence_cache (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            jp         TEXT NOT NULL,
+            jp_tiles   TEXT NOT NULL,
+            kr         TEXT NOT NULL,
+            kr_tiles   TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
 
 def init_db():
     """스키마 생성 + (데이터 버전이 바뀌었으면) 카드 재생성."""

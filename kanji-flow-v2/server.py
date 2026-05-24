@@ -6,6 +6,7 @@ import json
 import os
 import re
 import random
+import threading
 from datetime import date, timedelta
 from flask import Flask, jsonify, request, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
@@ -528,10 +529,18 @@ def build_quiz():
     if ids:
         id_set = {int(x) for x in ids.split(",") if x.strip().isdigit()}
         targets = [c for c in pool if c["id"] in id_set]
+    elif level:
+        targets = [c for c in pool if c["jlpt_level"] == level]
+        if ctype:
+            targets = [c for c in targets if c["type"] == ctype]
     else:
-        targets = pool
-        if level:
-            targets = [c for c in targets if c["jlpt_level"] == level]
+        # 등급 지정이 없으면 내 학습 설정(레벨·급수·종류·카테고리) 범위로 출제
+        cond, sparams = _active_scope()
+        conn2 = get_db()
+        scope_ids = {row[0] for row in conn2.execute(
+            f"SELECT c.id FROM cards c JOIN reviews r ON r.card_id = c.id WHERE {cond}", sparams).fetchall()}
+        conn2.close()
+        targets = [c for c in pool if c["id"] in scope_ids]
         if ctype:
             targets = [c for c in targets if c["type"] == ctype]
 
@@ -828,19 +837,11 @@ def ai_lyrics():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.route("/api/ai/sentences", methods=["POST"])
-def ai_sentences():
-    """학습한 단어로 AI가 문장 연습 문제 생성 (단어 타일 + 정답 순서)."""
-    api_key = get_setting("gemini_api_key", "")
-    if not api_key:
-        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
-    model = get_setting("gemini_model", "gemini-3.5-flash")
-
+def _generate_sentences_raw(api_key, model, n=6):
+    """Gemini로 문장 연습 문제 n개 생성 (학습 범위 단어 활용). 깨끗한 리스트 반환."""
     levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] or ["N5"]
     order = {"N5": 5, "N4": 4, "N3": 3, "N2": 2, "N1": 1}
-    easiest = min(levels, key=lambda x: order.get(x, 5))  # 가장 쉬운 레벨 기준
-
-    # 학습 중인(또는 범위 내) 단어를 우선 활용
+    easiest = min(levels, key=lambda x: order.get(x, 5))
     cond, params = _level_scope()
     conn = get_db()
     rows = conn.execute(f"""
@@ -851,32 +852,91 @@ def ai_sentences():
     conn.close()
     words = [f"{r['front']}({r['back_meaning']})" for r in rows]
     words_str = ", ".join(words) if words else "기본 N5 단어"
-
     prompt = (
         f"너는 일본어 교사야. JLPT {easiest} 수준의 한국인 학습자를 위해 짧고 자연스러운 "
-        f"일본어 예문 5개를 만들어줘. 가능하면 다음 단어들을 활용해: {words_str}.\n"
+        f"일본어 예문 {n}개를 만들어줘. 가능하면 다음 단어들을 활용해: {words_str}.\n"
         f"각 문장을 다음 형식의 JSON 객체로 만들어줘:\n"
         f'{{"jp": "일본어 문장", "jp_tiles": ["일본어를","의미","단위로","끊은","배열"], '
         f'"kr": "한국어 번역", "kr_tiles": ["한국어를","어절","단위로","끊은","배열"]}}\n'
         f"jp_tiles는 일본어 문장을 어절/단어 단위로 끊어 순서대로 담은 배열, "
         f"kr_tiles는 한국어 번역을 어절 단위로 끊은 배열이야. "
-        f"조사도 적절히 붙여서 4~8조각 정도로 끊어줘.\n"
-        f"전체를 JSON 배열로만 출력해."
+        f"조사도 적절히 붙여서 4~8조각 정도로 끊어줘.\n전체를 JSON 배열로만 출력해."
     )
+    data = _gemini_json(prompt, api_key, model)
+    items = data if isinstance(data, list) else data.get("sentences", [])
+    return [s for s in items
+            if s.get("jp") and s.get("kr") and s.get("jp_tiles") and s.get("kr_tiles")]
+
+
+def _store_sentences(items):
+    conn = get_db()
+    for s in items:
+        conn.execute(
+            "INSERT INTO sentence_cache (jp, jp_tiles, kr, kr_tiles, created_at) VALUES (?, ?, ?, ?, ?)",
+            (s["jp"], json.dumps(s["jp_tiles"], ensure_ascii=False),
+             s["kr"], json.dumps(s["kr_tiles"], ensure_ascii=False), date.today().isoformat()))
+    conn.commit()
+    conn.close()
+
+
+def _pregen_sentences_job():
+    """백그라운드로 문장 캐시를 채운다 (풀이 넉넉하면 생략)."""
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return
+    conn = get_db()
+    total = conn.execute("SELECT COUNT(*) FROM sentence_cache").fetchone()[0]
+    conn.close()
+    if total >= 40:
+        return
+    model = get_setting("gemini_model", "gemini-3.5-flash")
     try:
-        data = _gemini_json(prompt, api_key, model)
-        # 배열 또는 {sentences:[...]} 형태 모두 허용
-        items = data if isinstance(data, list) else data.get("sentences", [])
-        clean = [s for s in items
-                 if s.get("jp") and s.get("kr") and s.get("jp_tiles") and s.get("kr_tiles")]
-        if not clean:
+        _store_sentences(_generate_sentences_raw(api_key, model, 6))
+    except Exception:
+        pass
+
+
+@app.route("/api/ai/sentences", methods=["POST"])
+def ai_sentences():
+    """문장 연습 — 캐시에서 즉시 제공, 부족하면 동기 생성. 캐시는 백그라운드로 보충."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT jp, jp_tiles, kr, kr_tiles FROM sentence_cache ORDER BY RANDOM() LIMIT 5").fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM sentence_cache").fetchone()[0]
+    conn.close()
+
+    def to_item(r):
+        return {"jp": r["jp"], "jp_tiles": json.loads(r["jp_tiles"]),
+                "kr": r["kr"], "kr_tiles": json.loads(r["kr_tiles"])}
+
+    if len(rows) >= 5:
+        if total < 20:
+            threading.Thread(target=_pregen_sentences_job, daemon=True).start()  # 비동기 보충
+        return jsonify({"sentences": [to_item(r) for r in rows]})
+
+    # 캐시 부족 → 동기 생성
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+    try:
+        items = _generate_sentences_raw(api_key, model, 6)
+        if not items:
             return jsonify({"error": "문장 생성 결과가 비어 있어요. 다시 시도해 주세요."}), 502
-        return jsonify({"sentences": clean})
+        _store_sentences(items)
+        return jsonify({"sentences": items[:5]})
     except Exception as e:
         import urllib.error
         if isinstance(e, urllib.error.HTTPError):
             return jsonify({"error": f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}), 502
         return jsonify({"error": f"문장 생성 실패: {e}"}), 502
+
+
+@app.route("/api/ai/pregenerate", methods=["POST"])
+def ai_pregenerate():
+    """학습 종료 등 시점에 문장 캐시를 백그라운드로 채우도록 트리거 (즉시 반환)."""
+    threading.Thread(target=_pregen_sentences_job, daemon=True).start()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/ai/session_summary", methods=["POST"])
