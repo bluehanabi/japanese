@@ -1490,3 +1490,79 @@ html, body {
   border-color: var(--btn-again);
   color: #f87171;
 }
+
+/* ── 학습 카드 앞면 발음(설정) ───────────────────────── */
+.card-front-reading {
+  margin-top: 14px;
+  font-family: var(--font-jp);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 90%;
+  line-height: 1.4;
+}
+
+/* ── 보조(고스트) 버튼 ───────────────────────────────── */
+.start-btn.ghost {
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+/* ── 퀴즈 정답 공개 패널 ─────────────────────────────── */
+.quiz-reveal {
+  width: 100%;
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  text-align: center;
+  animation: slideUp 0.25s var(--ease) both;
+}
+.quiz-reveal.ok { border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.08); }
+.quiz-reveal.ng { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
+.quiz-reveal .reveal-mark {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.quiz-reveal.ok .reveal-mark { color: #34d399; }
+.quiz-reveal.ng .reveal-mark { color: #f87171; }
+.quiz-reveal .reveal-front {
+  font-family: var(--font-jp);
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+.quiz-reveal .reveal-reading {
+  font-family: var(--font-jp);
+  font-size: 16px;
+  color: var(--cyan);
+  margin-top: 6px;
+}
+.quiz-reveal .reveal-meaning {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ── 퀴즈 다음 버튼 ──────────────────────────────────── */
+.quiz-next-btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 16px;
+  border: none;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--indigo), var(--indigo-dark));
+  color: #fff;
+  font-family: var(--font-kr);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 24px var(--indigo-glow);
+  -webkit-tap-highlight-color: transparent;
+}
+.quiz-next-btn:active { transform: scale(0.98); }

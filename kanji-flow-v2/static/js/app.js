@@ -119,18 +119,19 @@ async function loadHome() {
     document.getElementById("home-done").textContent = stats.today_reviewed;
     document.getElementById("home-streak").textContent = stats.streak;
 
-    // 학습 시작 버튼
+    // 학습 시작 버튼 (오늘 목표를 끝내면 '추가 학습'으로 전환)
     const startBtn = document.getElementById("start-study-btn");
+    startBtn.disabled = false;
     if (today.total_due === 0) {
-      startBtn.textContent = "✅ 오늘 학습 완료!";
-      startBtn.disabled = true;
+      startBtn.innerHTML = `🔄 추가 학습하기 <span style="opacity:.7;font-weight:500">(오늘 목표 완료 ✅)</span>`;
+      startBtn.onclick = () => startStudy(true);
     } else {
       startBtn.innerHTML = `
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
           <path d="M5 3l14 9-14 9V3z" fill="white"/>
         </svg>
         지금 바로 학습 시작 (${today.total_due}개)`;
-      startBtn.disabled = false;
+      startBtn.onclick = () => startStudy(false);
     }
 
     // 상태 분포 바
@@ -160,27 +161,29 @@ async function loadHome() {
 //  학습 세션
 // ══════════════════════════════════════════════════════════
 
-async function startStudy() {
+async function startStudy(extra = false) {
+  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  const review_cards = data.review_cards || [];
+  const new_cards = data.new_cards || [];
+  const queue = [...review_cards, ...new_cards];
+
+  if (queue.length === 0) {
+    showToast(extra ? "더 학습할 카드가 없어요 🎉" : "오늘 학습할 카드가 없어요");
+    return;
+  }
+
   showView("study");
   document.getElementById("study-complete").style.display = "none";
   document.getElementById("flashcard-scene").style.display = "block";
   // 평가 버튼은 .visible 클래스로만 제어 (인라인 display 를 쓰면 .visible 이 무시됨)
   document.getElementById("rating-wrap").classList.remove("visible");
 
-  const data = await apiFetch("/api/today") || {};
-  const review_cards = data.review_cards || [];
-  const new_cards = data.new_cards || [];
-
   // 복습 카드 먼저, 그 다음 신규
-  State.study.queue = [...review_cards, ...new_cards];
+  State.study.queue = queue;
+  State.study.extra = extra;
   State.study.index = 0;
   State.study.sessionCorrect = 0;
   State.study.sessionTotal = 0;
-
-  if (State.study.queue.length === 0) {
-    showStudyComplete();
-    return;
-  }
 
   showCard(0);
 }
@@ -217,6 +220,15 @@ function showCard(index) {
   const frontText = document.getElementById("card-front-text");
   frontText.textContent = card.front;
   frontText.className = `card-main-text${card.type === "word" ? " word-text" : ""}`;
+
+  // 설정: 앞면에 발음(읽기) 표시
+  const frontReading = document.getElementById("card-front-reading");
+  if (State.settings.show_reading_on_front === "1" && card.back_reading) {
+    frontReading.textContent = card.back_reading;
+    frontReading.style.display = "block";
+  } else {
+    frontReading.style.display = "none";
+  }
 
   // 뒷면 준비
   document.getElementById("card-back-kanji").textContent =
@@ -805,6 +817,10 @@ function showQuizQuestion(index) {
   quiz.index = index;
   quiz.answered = false;
 
+  // 이전 문제의 정답 공개 패널/다음 버튼 숨김
+  document.getElementById("quiz-reveal").style.display = "none";
+  document.getElementById("quiz-next-btn").style.display = "none";
+
   const q = quiz.questions[index];
   const total = quiz.questions.length;
 
@@ -840,7 +856,28 @@ function answerQuiz(btn, optionIndex) {
 
   document.getElementById("quiz-score").textContent = quiz.correct;
 
-  setTimeout(() => showQuizQuestion(quiz.index + 1), isCorrect ? 650 : 1300);
+  // 정답·오답 모두 전체 정보(한자/단어 · 읽기 · 뜻)를 공개하고, 다음 버튼 노출
+  showQuizReveal(q, isCorrect);
+}
+
+function showQuizReveal(q, isCorrect) {
+  const info = q.info || {};
+  const el = document.getElementById("quiz-reveal");
+  el.className = `quiz-reveal ${isCorrect ? "ok" : "ng"}`;
+  el.innerHTML = `
+    <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}</div>
+    <div class="reveal-front">${escapeHtml(info.front || q.prompt)}</div>
+    ${info.reading ? `<div class="reveal-reading">${escapeHtml(info.reading)}</div>` : ""}
+    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(info.meaning)}</div>` : ""}`;
+  el.style.display = "block";
+
+  const nb = document.getElementById("quiz-next-btn");
+  nb.textContent = (State.quiz.index >= State.quiz.questions.length - 1) ? "결과 보기 →" : "다음 →";
+  nb.style.display = "block";
+}
+
+function quizNext() {
+  showQuizQuestion(State.quiz.index + 1);
 }
 
 function showQuizComplete() {

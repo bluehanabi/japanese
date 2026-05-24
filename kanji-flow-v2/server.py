@@ -31,9 +31,10 @@ def index():
 def get_today_cards():
     """오늘 복습 예정 카드 + 새 카드 반환 (설정 및 셔플 연동)"""
     today = date.today().isoformat()
+    extra = request.args.get("extra") == "1"   # 추가 학습 모드 (오늘 목표 초과)
     study_mode = get_setting("study_mode", "both")
     daily_new = int(get_setting("daily_new_cards", "10"))
-    
+
     active_levels_str = get_setting("active_levels", "N5,N4")
     active_categories_str = get_setting("active_categories", "자연,사람,행동,감정,일상,지식")
     shuffle_study = get_setting("shuffle_study", "1")
@@ -55,7 +56,8 @@ def get_today_cards():
         WHERE rl.reviewed_at = ? AND (SELECT repetitions FROM reviews WHERE card_id = c.id) = 1
     """, (today,)).fetchone()[0]
 
-    remaining_new = max(0, daily_new - new_done_today)
+    # 추가 학습 모드면 오늘 한 개수와 무관하게 새 카드 한 묶음을 더 제공
+    remaining_new = daily_new if extra else max(0, daily_new - new_done_today)
 
     # 모드 필터
     type_filter = ""
@@ -97,6 +99,22 @@ def get_today_cards():
         LIMIT ?
     """, query_params_new).fetchall()
 
+    # 추가 학습인데 복습/신규가 모두 없으면 → 이미 학습한 카드 무작위 복습
+    free_cards = []
+    if extra and not review_cards and not new_cards:
+        free_cards = conn.execute(f"""
+            SELECT c.*, r.ease_factor, r.interval, r.repetitions,
+                   r.next_review, r.total_reviews, r.correct_count, r.id as review_id
+            FROM cards c
+            JOIN reviews r ON r.card_id = c.id
+            WHERE r.repetitions > 0
+            AND c.jlpt_level IN ({level_placeholders})
+            AND c.category IN ({category_placeholders})
+            {type_filter}
+            ORDER BY RANDOM()
+            LIMIT ?
+        """, levels + categories + [20]).fetchall()
+
     conn.close()
 
     def row_to_dict(row):
@@ -114,7 +132,7 @@ def get_today_cards():
         }
         return d
 
-    review_list = [row_to_dict(r) for r in review_cards]
+    review_list = [row_to_dict(r) for r in review_cards] + [row_to_dict(r) for r in free_cards]
     new_list = [row_to_dict(r) for r in new_cards]
 
     # 셔플 활성화 시 복습 카드와 신규 카드를 개별적으로 무작위로 섞음
@@ -441,6 +459,12 @@ def build_quiz():
             "prompt": prompt,
             "answer": answer,
             "options": options,
+            # 정답 공개 후 보여줄 전체 정보 (한자/단어 · 읽기 · 뜻)
+            "info": {
+                "front": c["front"],
+                "reading": c["back_reading"],
+                "meaning": c["back_meaning"],
+            },
         })
 
     return jsonify({"questions": questions, "available": len(targets)})

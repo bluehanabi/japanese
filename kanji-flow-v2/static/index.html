@@ -45,7 +45,7 @@
     </div>
 
     <!-- 학습 시작 버튼 -->
-    <button class="start-btn" id="start-study-btn" onclick="startStudy()">
+    <button class="start-btn" id="start-study-btn" onclick="startStudy(false)">
       <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
         <path d="M5 3l14 9-14 9V3z" fill="white"/>
       </svg>
@@ -126,6 +126,7 @@
         <div class="card-face card-front">
           <div class="card-type-badge" id="front-level-badge">N5</div>
           <div class="card-main-text" id="card-front-text">日</div>
+          <div class="card-front-reading" id="card-front-reading" style="display:none"></div>
           <div class="card-hint card-tap-hint">
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/>
@@ -192,7 +193,10 @@
           <div class="lbl">정확도</div>
         </div>
       </div>
-      <button class="start-btn" onclick="showView('home'); loadHome();" style="margin:0">
+      <button class="start-btn" onclick="startStudy(true)" style="margin:0 0 10px">
+        🔄 더 학습하기
+      </button>
+      <button class="start-btn ghost" onclick="showView('home'); loadHome();" style="margin:0">
         홈으로 돌아가기
       </button>
     </div>
@@ -220,6 +224,9 @@
         <div class="quiz-prompt" id="quiz-prompt">日</div>
       </div>
       <div class="quiz-options" id="quiz-options"></div>
+      <!-- 정답 공개 후 전체 정보 -->
+      <div class="quiz-reveal" id="quiz-reveal" style="display:none"></div>
+      <button class="quiz-next-btn" id="quiz-next-btn" style="display:none" onclick="quizNext()">다음 →</button>
     </div>
 
     <!-- 퀴즈 완료 -->
