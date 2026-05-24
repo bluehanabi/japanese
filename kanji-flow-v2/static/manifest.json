@@ -1,7 +1,7 @@
 {
-  "name": "Kanji Flow",
-  "short_name": "Kanji Flow",
-  "description": "SM-2 간격 반복 기반 일본어 한자/단어 학습 앱",
+  "name": "스이스이 일본어",
+  "short_name": "스이스이",
+  "description": "AI 기반 일본어 한자·단어·문법·쓰기 학습 앱",
   "lang": "ko",
   "start_url": "/",
   "scope": "/",

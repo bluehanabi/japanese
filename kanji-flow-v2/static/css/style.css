@@ -1826,3 +1826,14 @@ html, body {
 .wr-rating { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .wr-score { font-size: 13px; font-weight: 700; color: var(--indigo); }
 .wr-feedback { font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+
+/* 홈 타이틀의 일본어 부제 */
+.home-title span.home-title-jp {
+  font-family: var(--font-jp);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+  background: none;
+  margin-left: 4px;
+}
