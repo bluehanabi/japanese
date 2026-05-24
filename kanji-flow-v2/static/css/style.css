@@ -1728,3 +1728,75 @@ html, body {
   color: var(--purple);
   border: 1px solid rgba(167,139,250,0.35);
 }
+
+/* ── 문장 연습 (타일 배열) ───────────────────────────── */
+.sent-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 28px;
+  overflow-y: auto;
+}
+.sent-direction {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 14px;
+}
+.sent-prompt {
+  font-family: var(--font-jp);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 20px 16px;
+  margin-bottom: 18px;
+}
+.sent-answer {
+  min-height: 56px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-content: flex-start;
+  border-bottom: 2px dashed var(--border-active);
+  padding: 6px 0 14px;
+  margin-bottom: 16px;
+}
+.sent-placeholder { color: var(--text-muted); font-size: 13px; align-self: center; }
+.sent-bank {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.tile {
+  font-family: var(--font-jp);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-active);
+  border-radius: var(--r-sm);
+  padding: 10px 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tile:active { transform: scale(0.95); }
+.sent-result {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: var(--r-md);
+  text-align: center;
+  animation: slideUp 0.25s var(--ease) both;
+}
+.sent-result.ok { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.4); }
+.sent-result.ng { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.4); }
+.sent-result-mark { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.sent-result.ok .sent-result-mark { color: #34d399; }
+.sent-result.ng .sent-result-mark { color: #f87171; }
+.sent-result-jp { font-family: var(--font-jp); font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.sent-result-kr { font-size: 14px; color: var(--text-secondary); margin-top: 4px; }

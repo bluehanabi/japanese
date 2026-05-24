@@ -666,6 +666,23 @@ def _gemini_stream(prompt, api_key, model):
 
 _NO_MD = "\n\n마크다운 기호(*, #, -, ` 등) 쓰지 말고 일반 문장과 줄바꿈으로만 써줘. 너무 길지 않게."
 
+def _gemini_json(prompt, api_key, model):
+    """Gemini 호출 — JSON 응답 강제(responseMimeType)하여 파싱된 객체 반환."""
+    import urllib.request
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{model}:generateContent?key={api_key}")
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    text = data["candidates"][0]["content"]["parts"][0]["text"]
+    return json.loads(text)
+
+
 def _build_explain_prompt(c):
     t = c["type"]
     if t == "kanji":
@@ -776,6 +793,57 @@ def ai_lyrics():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/ai/sentences", methods=["POST"])
+def ai_sentences():
+    """학습한 단어로 AI가 문장 연습 문제 생성 (단어 타일 + 정답 순서)."""
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+
+    levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] or ["N5"]
+    order = {"N5": 5, "N4": 4, "N3": 3, "N2": 2, "N1": 1}
+    easiest = min(levels, key=lambda x: order.get(x, 5))  # 가장 쉬운 레벨 기준
+
+    # 학습 중인(또는 범위 내) 단어를 우선 활용
+    cond, params = _level_scope()
+    conn = get_db()
+    rows = conn.execute(f"""
+        SELECT c.front, c.back_meaning FROM cards c JOIN reviews r ON r.card_id = c.id
+        WHERE c.type = 'word' AND {cond}
+        ORDER BY (r.repetitions > 0) DESC, RANDOM() LIMIT 8
+    """, params).fetchall()
+    conn.close()
+    words = [f"{r['front']}({r['back_meaning']})" for r in rows]
+    words_str = ", ".join(words) if words else "기본 N5 단어"
+
+    prompt = (
+        f"너는 일본어 교사야. JLPT {easiest} 수준의 한국인 학습자를 위해 짧고 자연스러운 "
+        f"일본어 예문 5개를 만들어줘. 가능하면 다음 단어들을 활용해: {words_str}.\n"
+        f"각 문장을 다음 형식의 JSON 객체로 만들어줘:\n"
+        f'{{"jp": "일본어 문장", "jp_tiles": ["일본어를","의미","단위로","끊은","배열"], '
+        f'"kr": "한국어 번역", "kr_tiles": ["한국어를","어절","단위로","끊은","배열"]}}\n'
+        f"jp_tiles는 일본어 문장을 어절/단어 단위로 끊어 순서대로 담은 배열, "
+        f"kr_tiles는 한국어 번역을 어절 단위로 끊은 배열이야. "
+        f"조사도 적절히 붙여서 4~8조각 정도로 끊어줘.\n"
+        f"전체를 JSON 배열로만 출력해."
+    )
+    try:
+        data = _gemini_json(prompt, api_key, model)
+        # 배열 또는 {sentences:[...]} 형태 모두 허용
+        items = data if isinstance(data, list) else data.get("sentences", [])
+        clean = [s for s in items
+                 if s.get("jp") and s.get("kr") and s.get("jp_tiles") and s.get("kr_tiles")]
+        if not clean:
+            return jsonify({"error": "문장 생성 결과가 비어 있어요. 다시 시도해 주세요."}), 502
+        return jsonify({"sentences": clean})
+    except Exception as e:
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            return jsonify({"error": f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}), 502
+        return jsonify({"error": f"문장 생성 실패: {e}"}), 502
 
 
 @app.route("/api/ai/session_summary", methods=["POST"])

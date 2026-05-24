@@ -45,6 +45,10 @@ const State = {
   lyrics: {
     foundIds: [],
   },
+  sentence: {
+    items: [], index: 0, direction: "jp2kr",
+    target: [], answer: [], bank: [], answered: false, correct: 0,
+  },
   settings: {
     daily_new_cards: 10,
     study_mode: "both",
@@ -106,7 +110,7 @@ function showView(name) {
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (name === "study" || name === "quiz") ? "none" : "flex";
+    (name === "study" || name === "quiz" || name === "sentence") ? "none" : "flex";
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1005,6 +1009,8 @@ function showQuizReveal(q, isCorrect) {
   const nb = document.getElementById("quiz-next-btn");
   nb.textContent = (State.quiz.index >= State.quiz.questions.length - 1) ? "결과 보기 →" : "다음 →";
   nb.style.display = "block";
+
+  speakQuizReveal();   // 정답 공개 시 일본어 발음 자동 재생
 }
 
 function quizNext() {
@@ -1041,6 +1047,130 @@ function showQuizComplete() {
 }
 
 function endQuiz() {
+  showView("home");
+  loadHome();
+}
+
+// ══════════════════════════════════════════════════════════
+//  문장 연습 (단어 타일 배열, 듀오링고식)
+// ══════════════════════════════════════════════════════════
+
+function shuffleArr(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function startSentencePractice() {
+  const data = await apiFetch("/api/ai/sentences", "POST", {});
+  if (data.error) { showToast(data.error); return; }
+  const items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  if (!items.length) { showToast("문장을 만들지 못했어요. 다시 시도해 주세요."); return; }
+
+  State.sentence.items = items;
+  State.sentence.index = 0;
+  State.sentence.correct = 0;
+  showView("sentence");
+  document.getElementById("sent-complete").style.display = "none";
+  document.getElementById("sent-body").style.display = "flex";
+  showSentence(0);
+}
+
+function showSentence(i) {
+  const S = State.sentence;
+  if (i >= S.items.length) { showSentenceComplete(); return; }
+  S.index = i;
+  S.answered = false;
+
+  const item = S.items[i];
+  S.direction = Math.random() < 0.5 ? "jp2kr" : "kr2jp";
+  if (S.direction === "jp2kr") {
+    document.getElementById("sent-direction").textContent = "일본어 문장을 보고 한국어를 순서대로 배열하세요";
+    document.getElementById("sent-prompt").textContent = item.jp;
+    S.target = item.kr_tiles.slice();
+  } else {
+    document.getElementById("sent-direction").textContent = "한국어 문장을 보고 일본어를 순서대로 배열하세요";
+    document.getElementById("sent-prompt").textContent = item.kr;
+    S.target = item.jp_tiles.slice();
+  }
+  S.answer = [];
+  S.bank = shuffleArr(S.target);
+
+  document.getElementById("sent-progress").style.width = Math.round(i / S.items.length * 100) + "%";
+  document.getElementById("sent-progress-text").textContent = `${i + 1} / ${S.items.length}`;
+  document.getElementById("sent-result").style.display = "none";
+  const checkBtn = document.getElementById("sent-check");
+  checkBtn.textContent = "확인";
+  checkBtn.disabled = false;
+  checkBtn.onclick = checkSentence;
+  renderSentence();
+}
+
+function renderSentence() {
+  const S = State.sentence;
+  document.getElementById("sent-answer").innerHTML = S.answer.map((t, i) =>
+    `<button class="tile" onclick="unpickTile(${i})">${escapeHtml(t)}</button>`).join("")
+    || '<span class="sent-placeholder">아래에서 단어를 순서대로 누르세요</span>';
+  document.getElementById("sent-bank").innerHTML = S.bank.map((t, i) =>
+    t === null ? "" : `<button class="tile" onclick="pickTile(${i})">${escapeHtml(t)}</button>`).join("");
+}
+
+function pickTile(i) {
+  const S = State.sentence;
+  if (S.answered || S.bank[i] === null) return;
+  S.answer.push(S.bank[i]);
+  S.bank[i] = null;          // 자리 비움(중복 단어 인덱스 유지)
+  renderSentence();
+}
+
+function unpickTile(i) {
+  const S = State.sentence;
+  if (S.answered) return;
+  const t = S.answer.splice(i, 1)[0];
+  const empty = S.bank.indexOf(null);
+  if (empty >= 0) S.bank[empty] = t; else S.bank.push(t);
+  renderSentence();
+}
+
+function checkSentence() {
+  const S = State.sentence;
+  if (S.answered) return;
+  S.answered = true;
+  const isCorrect = S.answer.join("") === S.target.join("");
+  if (isCorrect) S.correct++;
+
+  const item = S.items[S.index];
+  const resEl = document.getElementById("sent-result");
+  resEl.style.display = "block";
+  resEl.className = `sent-result ${isCorrect ? "ok" : "ng"}`;
+  resEl.innerHTML = `
+    <div class="sent-result-mark">${isCorrect ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="sent-result-jp">${escapeHtml(item.jp)}</div>
+    <div class="sent-result-kr">${escapeHtml(item.kr)}</div>`;
+
+  speak(item.jp);   // 정답 완료 시 일본어 발음 자동 재생
+
+  const checkBtn = document.getElementById("sent-check");
+  checkBtn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
+  checkBtn.onclick = () => showSentence(S.index + 1);
+}
+
+function showSentenceComplete() {
+  document.getElementById("sent-body").style.display = "none";
+  document.getElementById("sent-complete").style.display = "flex";
+  document.getElementById("sent-progress").style.width = "100%";
+  const total = State.sentence.items.length;
+  const correct = State.sentence.correct;
+  document.getElementById("sent-total").textContent = total;
+  document.getElementById("sent-correct").textContent = correct;
+  document.getElementById("sent-accuracy").textContent =
+    (total ? Math.round(correct / total * 100) : 0) + "%";
+}
+
+function endSentence() {
   showView("home");
   loadHome();
 }
