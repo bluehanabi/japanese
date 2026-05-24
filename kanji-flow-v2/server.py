@@ -84,6 +84,7 @@ def get_today_cards():
     #  - 일반 학습: 오늘 복습 예정(next_review <= 오늘)인 카드만
     #  - 추가 학습: 진행 중(학습 중) 카드 전체에서 무작위 (예정일 무관) → '학습중 + @'
     if extra:
+        # 추가 학습: 진행 중(학습 중) 카드 무작위로 설정 개수만큼
         review_cards = conn.execute(f"""
             SELECT c.*, r.ease_factor, r.interval, r.repetitions,
                    r.next_review, r.total_reviews, r.correct_count, r.id as review_id
@@ -94,8 +95,8 @@ def get_today_cards():
             AND c.category IN ({category_placeholders})
             {type_filter}
             ORDER BY RANDOM()
-            LIMIT 30
-        """, levels + categories).fetchall()
+            LIMIT ?
+        """, levels + categories + [daily_new]).fetchall()
     else:
         review_cards = conn.execute(f"""
             SELECT c.*, r.ease_factor, r.interval, r.repetitions,
@@ -144,8 +145,16 @@ def get_today_cards():
     review_list = [row_to_dict(r) for r in review_cards]
     new_list = [row_to_dict(r) for r in new_cards]
 
-    # 셔플 활성화 시 복습 카드와 신규 카드를 개별적으로 무작위로 섞음
-    if shuffle_study == "1":
+    if extra:
+        # 추가 학습: 설정 개수(daily_new)만큼, 학습 중 카드를 우선 채우고
+        # 모자라면 신규로 채운 뒤, 전부 한데 섞어서 출제
+        queue = review_list[:daily_new]
+        if len(queue) < daily_new:
+            queue += new_list[:daily_new - len(queue)]
+        random.shuffle(queue)
+        review_list, new_list = queue, []
+    elif shuffle_study == "1":
+        # 일반 학습: 복습/신규를 개별적으로 섞음 (복습 우선 순서 유지)
         random.shuffle(review_list)
         random.shuffle(new_list)
 
