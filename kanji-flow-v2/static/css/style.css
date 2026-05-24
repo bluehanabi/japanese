@@ -1603,3 +1603,19 @@ html, body {
   color: var(--text-secondary);
   margin-top: 2px;
 }
+
+/* ── 단어장 필터 칩 상단 고정 + 목록 푸터 ──────────────── */
+.filter-chips {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-deep);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.list-footer {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 16px 0 8px;
+}

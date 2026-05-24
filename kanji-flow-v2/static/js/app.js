@@ -20,8 +20,11 @@ const State = {
   },
   vocab: {
     filter: "all",
-    allCards: [],
-    displayCards: [],
+    page: 1,
+    loading: false,
+    done: false,
+    cards: [],
+    search: "",
   },
   writing: {
     cards: [],
@@ -57,6 +60,7 @@ const State = {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setGreeting();
+  document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
   await loadHome();
   await loadSettings();
 });
@@ -269,9 +273,14 @@ function showCard(index) {
     });
   }
 
-  // 카드 뒤집기 초기화
+  // 카드 뒤집기 초기화 — 애니메이션 없이 즉시 앞면으로 (다음 카드 정답이 회전 중에 비치는 것 방지)
   const flashcard = document.getElementById("flashcard");
-  flashcard.classList.remove("flipped");
+  if (flashcard.classList.contains("flipped")) {
+    flashcard.style.transition = "none";
+    flashcard.classList.remove("flipped");
+    void flashcard.offsetWidth;        // 강제 reflow로 transition:none 적용
+    flashcard.style.transition = "";
+  }
   document.getElementById("rating-wrap").classList.remove("visible");
 
   // 예상 간격 표시
@@ -344,60 +353,55 @@ function endStudy() {
 //  단어장
 // ══════════════════════════════════════════════════════════
 
-async function loadVocab() {
-  const listEl = document.getElementById("card-list");
-  listEl.innerHTML = '<div class="spinner"></div>';
+const VOCAB_PER_PAGE = 60;
 
-  const data = await apiFetch("/api/cards?per_page=500");
-  State.vocab.allCards = data.cards;
-  renderCardList(applyFilter(data.cards, State.vocab.filter));
+// 필터 이름 → /api/cards 쿼리 파라미터
+function filterToQuery(filter) {
+  if (filter === "kanji" || filter === "word" || filter === "grammar") return `type=${filter}`;
+  if (["n5", "n4", "n3", "n2", "n1"].includes(filter)) return `level=${filter.toUpperCase()}`;
+  if (filter === "state-new")      return "state=new";
+  if (filter === "state-learning") return "state=learning";
+  if (filter === "state-mastered") return "state=mastered";
+  return "";
+}
+
+async function loadVocab(reset = true) {
+  const v = State.vocab;
+  if (v.loading || (!reset && v.done)) return;
+  v.loading = true;
+
+  if (reset) {
+    v.page = 1; v.done = false; v.cards = []; v.search = "";
+    document.getElementById("card-list").innerHTML = '<div class="spinner"></div>';
+  }
+
+  const q = filterToQuery(v.filter);
+  const data = await apiFetch(`/api/cards?per_page=${VOCAB_PER_PAGE}&page=${v.page}${q ? "&" + q : ""}`);
+  const cards = data.cards || [];
+  v.cards.push(...cards);
+  if (cards.length < VOCAB_PER_PAGE) v.done = true;
+  v.page++;
+  v.loading = false;
+  renderCardList(v.cards, data.total);
 }
 
 function setFilter(filter) {
   State.vocab.filter = filter;
-
-  // 칩 활성화
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
   const chipMap = {
-    "all":            "chip-all",
-    "kanji":          "chip-kanji",
-    "word":           "chip-word",
-    "grammar":        "chip-grammar",
-    "n5":             "chip-n5",
-    "n4":             "chip-n4",
-    "n3":             "chip-n3",
-    "n2":             "chip-n2",
-    "n1":             "chip-n1",
-    "state-new":      "chip-new",
-    "state-learning": "chip-learning",
-    "state-mastered": "chip-mastered",
+    "all": "chip-all", "kanji": "chip-kanji", "word": "chip-word", "grammar": "chip-grammar",
+    "n5": "chip-n5", "n4": "chip-n4", "n3": "chip-n3", "n2": "chip-n2", "n1": "chip-n1",
+    "state-new": "chip-new", "state-learning": "chip-learning", "state-mastered": "chip-mastered",
   };
   const el = document.getElementById(chipMap[filter]);
   if (el) el.classList.add("active");
-
-  renderCardList(applyFilter(State.vocab.allCards, filter));
+  document.getElementById("search-input").value = "";
+  loadVocab(true);
 }
 
-function applyFilter(cards, filter) {
-  switch (filter) {
-    case "kanji":          return cards.filter(c => c.type === "kanji");
-    case "word":           return cards.filter(c => c.type === "word");
-    case "grammar":        return cards.filter(c => c.type === "grammar");
-    case "n5":             return cards.filter(c => c.jlpt_level === "N5");
-    case "n4":             return cards.filter(c => c.jlpt_level === "N4");
-    case "n3":             return cards.filter(c => c.jlpt_level === "N3");
-    case "n2":             return cards.filter(c => c.jlpt_level === "N2");
-    case "n1":             return cards.filter(c => c.jlpt_level === "N1");
-    case "state-new":      return cards.filter(c => c.state === "new");
-    case "state-learning": return cards.filter(c => c.state === "learning");
-    case "state-mastered": return cards.filter(c => c.state === "mastered");
-    default:               return cards;
-  }
-}
-
-function renderCardList(cards) {
+function renderCardList(cards, total) {
   const listEl = document.getElementById("card-list");
-  State.vocab.displayCards = cards;
+  State.vocab.cards = cards;
 
   if (cards.length === 0) {
     listEl.innerHTML = `
@@ -409,39 +413,48 @@ function renderCardList(cards) {
     return;
   }
 
-  listEl.innerHTML = cards.map(card => {
+  const items = cards.map(card => {
     const frontCls = card.type === "kanji" ? "" : card.type === "grammar" ? "grammar-front" : "word-front";
     return `
-      <div class="card-list-item animate-in" onclick="openCardDetail(${card.id})">
+      <div class="card-list-item" onclick="openCardDetail(${card.id})">
         <div class="card-list-kanji ${frontCls}">${escapeHtml(card.front)}</div>
         <div class="card-list-info">
-          <div class="card-list-meaning">${card.back_meaning}</div>
-          <div class="card-list-reading">${card.back_reading}</div>
+          <div class="card-list-meaning">${escapeHtml(card.back_meaning)}</div>
+          <div class="card-list-reading">${escapeHtml(card.back_reading || "")}</div>
         </div>
         <div class="card-state-dot ${card.state}"></div>
       </div>`;
   }).join("");
+
+  const footer = State.vocab.done
+    ? (total ? `<div class="list-footer">전체 ${total}개${State.vocab.search ? " (검색)" : ""}</div>` : "")
+    : `<div class="list-footer">불러오는 중…</div>`;
+  listEl.innerHTML = items + footer;
+}
+
+// 무한 스크롤 — 바닥 근처에서 다음 페이지 로드
+function onVocabScroll(e) {
+  if (State.vocab.search) return;        // 검색 결과는 페이지네이션 없음
+  const el = e.target;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadVocab(false);
 }
 
 let searchTimer;
 function onSearch(query) {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
-    if (!query.trim()) {
-      renderCardList(applyFilter(State.vocab.allCards, State.vocab.filter));
-      return;
-    }
+    if (!query.trim()) { loadVocab(true); return; }
+    State.vocab.search = query;
+    State.vocab.done = true;
     const data = await apiFetch(`/api/search?q=${encodeURIComponent(query)}`);
-    renderCardList(data.results);
+    renderCardList(data.results || [], (data.results || []).length);
   }, 300);
 }
 
 function openCardDetail(id) {
-  const card = State.vocab.allCards.find(c => c.id === id)
-            || (State.vocab.displayCards || []).find(c => c.id === id);
+  const card = (State.vocab.cards || []).find(c => c.id === id);
   if (!card) return;
   if (card.type === "grammar") {
-    // 문법은 쓰기 연습 대신 의미/예문을 토스트로 안내
     showToast(`${card.front} — ${card.back_meaning}`);
     return;
   }

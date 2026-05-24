@@ -325,8 +325,9 @@ def _calc_streak(conn) -> int:
 @app.route("/api/cards")
 def get_all_cards():
     """전체 카드 목록 (타입, JLPT 레벨 필터 가능)"""
-    card_type = request.args.get("type")   # 'kanji' / 'word'
-    level = request.args.get("level")      # 'N5' / 'N4'
+    card_type = request.args.get("type")   # 'kanji' / 'word' / 'grammar'
+    level = request.args.get("level")      # 'N5' ~ 'N1'
+    state = request.args.get("state")      # 'new' / 'learning' / 'mastered'
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
     offset = (page - 1) * per_page
@@ -341,6 +342,12 @@ def get_all_cards():
     if level:
         where.append("c.jlpt_level = ?")
         params.append(level)
+    if state == "new":
+        where.append("r.repetitions = 0")
+    elif state == "learning":
+        where.append("r.repetitions > 0 AND r.interval < 21")
+    elif state == "mastered":
+        where.append("r.interval >= 21")
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -354,7 +361,7 @@ def get_all_cards():
     """, params + [per_page, offset]).fetchall()
 
     total = conn.execute(f"""
-        SELECT COUNT(*) FROM cards c {where_sql}
+        SELECT COUNT(*) FROM cards c JOIN reviews r ON r.card_id = c.id {where_sql}
     """, params).fetchone()[0]
 
     conn.close()
