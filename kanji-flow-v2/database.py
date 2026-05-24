@@ -10,7 +10,7 @@ from datetime import date
 DB_PATH = "kanji_flow.db"
 DATA_FILE = os.path.join(os.path.dirname(__file__), "anki_cards.json")
 # 데이터 버전 — 이 값이 바뀌면 배포 시 카드 DB를 자동으로 재생성한다.
-DATA_VERSION = "anki-jlpt-2025-09"
+DATA_VERSION = "anki-jlpt-2025-09b"
 
 
 def get_db():
@@ -37,7 +37,8 @@ def _create_schema(cur):
             back_reading TEXT NOT NULL,
             extra_info   TEXT,
             jlpt_level   TEXT NOT NULL,
-            category     TEXT NOT NULL DEFAULT '일반'
+            category     TEXT NOT NULL DEFAULT '일반',
+            sub_level    TEXT
         )
     """)
     cur.execute("""
@@ -75,6 +76,7 @@ def init_db():
         ("show_reading_on_front", "0"),
         ("study_mode",            "both"),
         ("active_levels",         "N5,N4"),
+        ("active_kanken",         "10급,9급,8급,7급"),   # 학습할 한자 漢検 급수
         ("shuffle_study",         "1"),
     ]
     for key, val in defaults:
@@ -113,10 +115,11 @@ def _insert_from_json(conn, cur):
     cats = []
     for c in data["cards"]:
         cur.execute("""
-            INSERT INTO cards (type, kanji, front, back_meaning, back_reading, extra_info, jlpt_level, category)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO cards (type, kanji, front, back_meaning, back_reading, extra_info, jlpt_level, category, sub_level)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (c["type"], c.get("kanji", c["front"]), c["front"], c["back_meaning"],
-              c.get("back_reading", ""), c.get("extra_info"), c["jlpt_level"], c.get("category", "일반")))
+              c.get("back_reading", ""), c.get("extra_info"), c["jlpt_level"], c.get("category", "일반"),
+              c.get("sub_level")))
         cur.execute("INSERT INTO reviews (card_id, next_review) VALUES (?, ?)", (cur.lastrowid, today))
         cat = c.get("category", "일반")
         if cat not in cats:

@@ -46,16 +46,19 @@ def get_today_cards():
     daily_new = int(get_setting("daily_new_cards", "10"))
 
     active_levels_str = get_setting("active_levels", "N5,N4")
-    active_categories_str = get_setting("active_categories", "자연,사람,행동,감정,일상,지식")
+    active_categories_str = get_setting("active_categories", "한자,명사,동사,형용사,부사,기타,문법")
+    active_kanken_str = get_setting("active_kanken", "10급,9급,8급,7급")
     shuffle_study = get_setting("shuffle_study", "1")
 
     # 콤마 기준 파싱 및 정제
     levels = [l.strip() for l in active_levels_str.split(",") if l.strip()]
     categories = [c.strip() for c in active_categories_str.split(",") if c.strip()]
+    kanken = [k.strip() for k in active_kanken_str.split(",") if k.strip()]
 
     # 빈 리스트 대비 기본값
     if not levels: levels = ["N5", "N4", "N3", "N2", "N1"]
     if not categories: categories = ["한자", "명사", "동사", "형용사", "부사", "기타", "문법"]
+    if not kanken: kanken = ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"]
 
     conn = get_db()
 
@@ -79,8 +82,14 @@ def get_today_cards():
         type_filter = "AND c.type = 'grammar'"
 
     # 등급 & 카테고리 동적 조건 생성을 위해 플레이스홀더 준비
-    level_placeholders = ",".join(["?"] * len(levels))
     category_placeholders = ",".join(["?"] * len(categories))
+    # 레벨 조건: 한자는 漢検 급수(sub_level), 그 외(어휘·문법)는 JLPT 레벨
+    level_cond = (
+        "((c.type = 'kanji' AND c.sub_level IN (%s)) "
+        "OR (c.type <> 'kanji' AND c.jlpt_level IN (%s)))"
+        % (",".join(["?"] * len(kanken)), ",".join(["?"] * len(levels)))
+    )
+    level_params = kanken + levels
 
     # 복습 카드
     #  - 일반 학습: 오늘 복습 예정(next_review <= 오늘)인 카드만
@@ -93,12 +102,12 @@ def get_today_cards():
             FROM cards c
             JOIN reviews r ON r.card_id = c.id
             WHERE r.repetitions > 0
-            AND c.jlpt_level IN ({level_placeholders})
+            AND {level_cond}
             AND c.category IN ({category_placeholders})
             {type_filter}
             ORDER BY RANDOM()
             LIMIT ?
-        """, levels + categories + [daily_new]).fetchall()
+        """, level_params + categories + [daily_new]).fetchall()
     else:
         review_cards = conn.execute(f"""
             SELECT c.*, r.ease_factor, r.interval, r.repetitions,
@@ -106,24 +115,26 @@ def get_today_cards():
             FROM cards c
             JOIN reviews r ON r.card_id = c.id
             WHERE r.next_review <= ? AND r.repetitions > 0
-            AND c.jlpt_level IN ({level_placeholders})
+            AND {level_cond}
             AND c.category IN ({category_placeholders})
             {type_filter}
             ORDER BY r.next_review ASC
-        """, [today] + levels + categories).fetchall()
+        """, [today] + level_params + categories).fetchall()
 
     # 신규 카드 (한 번도 안 본 것, 오늘 개수 제한)
-    query_params_new = levels + categories + [remaining_new]
+    # 셔플 켜짐: 무작위로 뽑아 타입(한자·단어·문법)이 골고루 섞이게 함
+    new_order = "RANDOM()" if shuffle_study == "1" else "c.jlpt_level DESC, c.type ASC, c.id ASC"
+    query_params_new = level_params + categories + [remaining_new]
     new_cards = conn.execute(f"""
         SELECT c.*, r.ease_factor, r.interval, r.repetitions,
                r.next_review, r.total_reviews, r.correct_count, r.id as review_id
         FROM cards c
         JOIN reviews r ON r.card_id = c.id
         WHERE r.repetitions = 0
-        AND c.jlpt_level IN ({level_placeholders})
+        AND {level_cond}
         AND c.category IN ({category_placeholders})
         {type_filter}
-        ORDER BY c.jlpt_level DESC, c.type ASC, c.id ASC
+        ORDER BY {new_order}
         LIMIT ?
     """, query_params_new).fetchall()
 
@@ -328,6 +339,7 @@ def get_all_cards():
     card_type = request.args.get("type")   # 'kanji' / 'word' / 'grammar'
     level = request.args.get("level")      # 'N5' ~ 'N1'
     state = request.args.get("state")      # 'new' / 'learning' / 'mastered'
+    kanken = request.args.get("kanken")    # '10급' ~ '2급' (한자 전용)
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 50))
     offset = (page - 1) * per_page
@@ -342,6 +354,9 @@ def get_all_cards():
     if level:
         where.append("c.jlpt_level = ?")
         params.append(level)
+    if kanken:
+        where.append("c.sub_level = ?")
+        params.append(kanken)
     if state == "new":
         where.append("r.repetitions = 0")
     elif state == "learning":
@@ -538,6 +553,18 @@ def analyze_lyrics():
 # ══════════════════════════════════════════════════════════
 #  API: 설정
 # ══════════════════════════════════════════════════════════
+
+@app.route("/api/kanken")
+def get_kanken():
+    """한자 漢検 급수 목록 (쉬운 순)."""
+    order = ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"]
+    conn = get_db()
+    rows = conn.execute("SELECT DISTINCT sub_level FROM cards WHERE type='kanji' AND sub_level IS NOT NULL").fetchall()
+    conn.close()
+    grades = [r["sub_level"] for r in rows]
+    grades.sort(key=lambda x: order.index(x) if x in order else 99)
+    return jsonify({"grades": grades})
+
 
 @app.route("/api/categories")
 def get_categories():

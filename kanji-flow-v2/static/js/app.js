@@ -50,7 +50,8 @@ const State = {
     show_reading_on_front: "0",
     shuffle_study: "1",
     active_levels: "N5,N4",
-    active_categories: "자연,사람,행동,감정,일상,지식",
+    active_kanken: "10급,9급,8급,7급",
+    active_categories: "한자,명사,동사,형용사,부사,기타,문법",
   },
 };
 
@@ -217,10 +218,15 @@ function showCard(index) {
   typeBadge.textContent = TYPE_LABEL[card.type] || "단어";
   typeBadge.className = `card-type-badge badge-${card.type}`;
 
-  // 레벨 배지 (n5 ~ n1 동적 뱃지 색상 매핑)
+  // 레벨 배지: 한자는 漢検 급수, 그 외는 JLPT 레벨
   const levelBadge = document.getElementById("front-level-badge");
-  levelBadge.textContent = card.jlpt_level;
-  levelBadge.className = `card-type-badge badge-${card.jlpt_level.toLowerCase()}`;
+  if (card.type === "kanji" && card.sub_level) {
+    levelBadge.textContent = "漢検 " + card.sub_level;
+    levelBadge.className = "card-type-badge badge-kanken";
+  } else {
+    levelBadge.textContent = card.jlpt_level;
+    levelBadge.className = `card-type-badge badge-${card.jlpt_level.toLowerCase()}`;
+  }
 
   // 앞면 텍스트 (단어·문법은 글자가 길어 작게)
   const frontText = document.getElementById("card-front-text");
@@ -625,6 +631,16 @@ async function loadSettingsUI() {
   }).join("");
   if (activeCats.length === 0) State.settings.active_categories = allCats.join(",");
 
+  // 漢検 급수 칩 동적 생성 + 활성화 복원
+  const activeKK = (s.active_kanken || "").split(",").map(x => x.trim()).filter(Boolean);
+  const kkData = await apiFetch("/api/kanken");
+  const allKK = kkData.grades || [];
+  const kkWrap = document.getElementById("settings-kanken-wrap");
+  kkWrap.innerHTML = allKK.map(g => {
+    const on = activeKK.includes(g);
+    return `<button class="select-chip${on ? " active" : ""}" id="setting-kanken-${g}" onclick="toggleSettingKanken('${g}')">${g}</button>`;
+  }).join("");
+
   // 총 카드
   document.getElementById("info-total-cards").textContent =
     document.getElementById("s-total")?.textContent || "—";
@@ -686,6 +702,23 @@ function toggleSettingCategory(category) {
     chip.classList.add("active");
   }
   State.settings.active_categories = categories.join(",");
+}
+
+function toggleSettingKanken(grade) {
+  let grades = (State.settings.active_kanken || "").split(",").map(x => x.trim()).filter(Boolean);
+  const chip = document.getElementById(`setting-kanken-${grade}`);
+  if (grades.includes(grade)) {
+    if (grades.length <= 1) {
+      showToast("⚠️ 최소한 하나 이상의 급수는 활성화해야 해요!");
+      return;
+    }
+    grades = grades.filter(g => g !== grade);
+    chip.classList.remove("active");
+  } else {
+    grades.push(grade);
+    chip.classList.add("active");
+  }
+  State.settings.active_kanken = grades.join(",");
 }
 
 async function saveSettings() {
