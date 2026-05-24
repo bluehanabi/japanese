@@ -6,7 +6,7 @@ import json
 import re
 import random
 from datetime import date, timedelta
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 from database import get_db, init_db, get_setting, set_setting
 from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_interval
@@ -640,6 +640,30 @@ def _gemini_generate(prompt, api_key, model):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
+def _gemini_stream(prompt, api_key, model):
+    """Gemini 스트리밍 호출 — 생성되는 텍스트 조각을 순서대로 yield."""
+    import urllib.request
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{model}:streamGenerateContent?alt=sse&key={api_key}")
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    resp = urllib.request.urlopen(req, timeout=60)
+    for raw in resp:
+        line = raw.decode("utf-8", "ignore").strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload:
+            continue
+        try:
+            d = json.loads(payload)
+            t = d["candidates"][0]["content"]["parts"][0]["text"]
+            if t:
+                yield t
+        except Exception:
+            continue
+
+
 _NO_MD = "\n\n마크다운 기호(*, #, -, ` 등) 쓰지 말고 일반 문장과 줄바꿈으로만 써줘. 너무 길지 않게."
 
 def _build_explain_prompt(c):
@@ -660,11 +684,16 @@ def _build_explain_prompt(c):
     return body + _NO_MD
 
 
+def _sse(obj):
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+
 @app.route("/api/ai/explain", methods=["POST"])
 def ai_explain():
-    """실시간 AI 설명 — 캐시에 있으면 그대로(백데이터), 없으면 생성 후 저장."""
-    card_id = (request.get_json() or {}).get("card_id")
-    force = (request.get_json() or {}).get("force")   # 다시 생성
+    """실시간 AI 설명 (SSE 스트리밍). 캐시에 있으면 즉시, 없으면 생성하며 흘려보냄."""
+    body_in = request.get_json() or {}
+    card_id = body_in.get("card_id")
+    force = body_in.get("force")
     conn = get_db()
     row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
     if not row:
@@ -673,31 +702,45 @@ def ai_explain():
     row = dict(row)
     card_key = f"{row['type']}:{row['front']}"
 
+    cached_row = None
     if not force:
-        cached = conn.execute("SELECT content FROM ai_cache WHERE card_key = ?", (card_key,)).fetchone()
-        if cached:
-            conn.close()
-            return jsonify({"text": cached["content"], "cached": True})
-
+        cached_row = conn.execute("SELECT content FROM ai_cache WHERE card_key = ?", (card_key,)).fetchone()
     api_key = get_setting("gemini_api_key", "")
-    if not api_key:
-        conn.close()
-        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
     model = get_setting("gemini_model", "gemini-3.5-flash")
-    try:
-        text = _gemini_generate(_build_explain_prompt(row), api_key, model)
-        conn.execute("INSERT OR REPLACE INTO ai_cache (card_key, content, created_at) VALUES (?, ?, ?)",
-                     (card_key, text, date.today().isoformat()))
-        conn.commit()
-        conn.close()
-        return jsonify({"text": text, "cached": False})
-    except Exception as e:
-        conn.close()
-        import urllib.error
-        if isinstance(e, urllib.error.HTTPError):
-            detail = e.read().decode("utf-8", "ignore")[:300]
-            return jsonify({"error": f"Gemini 오류 {e.code}: {detail}"}), 502
-        return jsonify({"error": f"AI 호출 실패: {e}"}), 502
+    cached_text = cached_row["content"] if cached_row else None
+    conn.close()
+
+    @stream_with_context
+    def generate():
+        if cached_text:
+            yield _sse({"t": cached_text, "cached": True})
+            yield _sse({"done": True})
+            return
+        if not api_key:
+            yield _sse({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."})
+            return
+        acc = []
+        try:
+            for chunk in _gemini_stream(_build_explain_prompt(row), api_key, model):
+                acc.append(chunk)
+                yield _sse({"t": chunk})
+        except Exception as e:
+            import urllib.error
+            msg = (f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"
+                   if isinstance(e, urllib.error.HTTPError) else f"AI 호출 실패: {e}")
+            yield _sse({"error": msg})
+            return
+        text = "".join(acc)
+        if text.strip():
+            c2 = get_db()
+            c2.execute("INSERT OR REPLACE INTO ai_cache (card_key, content, created_at) VALUES (?, ?, ?)",
+                       (card_key, text, date.today().isoformat()))
+            c2.commit()
+            c2.close()
+        yield _sse({"done": True})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.route("/api/ai/session_summary", methods=["POST"])

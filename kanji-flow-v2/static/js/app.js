@@ -1117,13 +1117,39 @@ async function aiExplain(cardId, label) {
   body.innerHTML = '<div class="spinner"></div>';
   overlay.classList.add("open");
 
-  const data = await apiFetch("/api/ai/explain", "POST", { card_id: cardId });
-  if (data.error) {
-    body.innerHTML = `<div class="ai-error">${escapeHtml(data.error)}</div>`;
-    return;
+  let acc = "";
+  const render = () => {
+    body.innerHTML = `<div class="ai-text">${escapeHtml(acc).replace(/\n/g, "<br>")}</div>`;
+  };
+
+  try {
+    const res = await fetch(API + "/api/ai/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_id: cardId }),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let obj;
+        try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (obj.error) { body.innerHTML = `<div class="ai-error">${escapeHtml(obj.error)}</div>`; return; }
+        if (obj.t) { acc += obj.t; render(); }
+      }
+    }
+    if (!acc.trim()) body.innerHTML = '<div class="ai-error">응답이 비어 있어요. 잠시 후 다시 시도해 주세요.</div>';
+  } catch (e) {
+    body.innerHTML = `<div class="ai-error">연결 오류: ${escapeHtml(String(e))}</div>`;
   }
-  // 줄바꿈 보존해서 표시
-  body.innerHTML = `<div class="ai-text">${escapeHtml(data.text || "").replace(/\n/g, "<br>")}</div>`;
 }
 
 function closeAI() {
