@@ -743,6 +743,41 @@ def ai_explain():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.route("/api/ai/lyrics", methods=["POST"])
+def ai_lyrics():
+    """일본어 가사를 AI로 분석 (SSE 스트리밍) — 주요 단어·문법·해석."""
+    text = ((request.get_json() or {}).get("text") or "").strip()[:3000]
+    if not text:
+        return jsonify({"error": "가사를 입력해 주세요."}), 400
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+    prompt = (
+        "다음 일본어 노래 가사를 한국인 일본어 학습자에게 분석해줘.\n"
+        "1) 주요 단어/한자: 단어(후리가나) - 뜻  형식으로 목록\n"
+        "2) 핵심 문법 표현 2~3개와 간단 설명\n"
+        "3) 전체 한국어 해석\n"
+        "마크다운 기호 없이 보기 좋게 줄바꿈으로 정리해줘.\n\n가사:\n" + text
+    )
+
+    @stream_with_context
+    def generate():
+        try:
+            for chunk in _gemini_stream(prompt, api_key, model):
+                yield _sse({"t": chunk})
+        except Exception as e:
+            import urllib.error
+            msg = (f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"
+                   if isinstance(e, urllib.error.HTTPError) else f"AI 호출 실패: {e}")
+            yield _sse({"error": msg})
+            return
+        yield _sse({"done": True})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.route("/api/ai/session_summary", methods=["POST"])
 def ai_session_summary():
     """학습 세션 종료 시 — AI 요약/조언을 만들고 session_log에 저장 (백데이터)."""

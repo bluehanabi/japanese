@@ -1719,3 +1719,12 @@ html, body {
   line-height: 1.6;
   color: var(--text-secondary);
 }
+
+/* ── 가사 분석 버튼 행 ───────────────────────────────── */
+.lyrics-btn-row { display: flex; gap: 10px; margin: 0 20px; }
+.lyrics-btn-row .analyze-btn { flex: 1; margin: 0; }
+.analyze-btn.ai {
+  background: rgba(167,139,250,0.16);
+  color: var(--purple);
+  border: 1px solid rgba(167,139,250,0.35);
+}

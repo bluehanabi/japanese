@@ -1156,6 +1156,44 @@ function closeAI() {
   document.getElementById("ai-overlay").classList.remove("open");
 }
 
+// SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)
+async function streamInto(url, payload, el) {
+  el.innerHTML = '<div class="spinner"></div>';
+  let acc = "";
+  const render = () => { el.innerHTML = `<div class="ai-text">${escapeHtml(acc).replace(/\n/g, "<br>")}</div>`; };
+  try {
+    const res = await fetch(API + url, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (obj.error) { el.innerHTML = `<div class="ai-error">${escapeHtml(obj.error)}</div>`; return; }
+        if (obj.t) { acc += obj.t; render(); }
+      }
+    }
+    if (!acc.trim()) el.innerHTML = '<div class="ai-error">응답이 비어 있어요.</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="ai-error">연결 오류: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function aiLyrics() {
+  const text = document.getElementById("lyrics-input").value.trim();
+  if (!text) { showToast("가사를 입력해 주세요!"); return; }
+  await streamInto("/api/ai/lyrics", { text }, document.getElementById("lyrics-results"));
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
