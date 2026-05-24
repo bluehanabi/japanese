@@ -631,15 +631,8 @@ async function loadSettingsUI() {
   }).join("");
   if (activeCats.length === 0) State.settings.active_categories = allCats.join(",");
 
-  // 漢検 급수 칩 동적 생성 + 활성화 복원
-  const activeKK = (s.active_kanken || "").split(",").map(x => x.trim()).filter(Boolean);
-  const kkData = await apiFetch("/api/kanken");
-  const allKK = kkData.grades || [];
-  const kkWrap = document.getElementById("settings-kanken-wrap");
-  kkWrap.innerHTML = allKK.map(g => {
-    const on = activeKK.includes(g);
-    return `<button class="select-chip${on ? " active" : ""}" id="setting-kanken-${g}" onclick="toggleSettingKanken('${g}')">${g}</button>`;
-  }).join("");
+  // 漢検 급수 칩 — 선택된 JLPT 등급에 해당하는 급수만 표시
+  renderKankenChips(false);
 
   // 총 카드
   document.getElementById("info-total-cards").textContent =
@@ -685,6 +678,8 @@ function toggleSettingLevel(level) {
     chip.classList.add("active");
   }
   State.settings.active_levels = levels.join(",");
+  // 등급이 바뀌면 그에 맞는 漢検 급수만 다시 표시 (해당 급수 전체 선택)
+  renderKankenChips(true);
 }
 
 function toggleSettingCategory(category) {
@@ -702,6 +697,36 @@ function toggleSettingCategory(category) {
     chip.classList.add("active");
   }
   State.settings.active_categories = categories.join(",");
+}
+
+// JLPT 등급 ↔ 漢検 급수 매핑 (난이도 근사)
+const KANKEN_BY_JLPT = {
+  "N5": ["10급", "9급"], "N4": ["8급", "7급"], "N3": ["6급", "5급"],
+  "N2": ["4급", "3급"],  "N1": ["준2급", "2급"],
+};
+const KANKEN_ORDER = ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"];
+
+function allowedKanken() {
+  const levels = (State.settings.active_levels || "").split(",").map(s => s.trim()).filter(Boolean);
+  const set = new Set();
+  levels.forEach(l => (KANKEN_BY_JLPT[l] || []).forEach(g => set.add(g)));
+  return KANKEN_ORDER.filter(g => set.has(g));
+}
+
+// 선택된 JLPT 등급에 해당하는 漢検 급수만 칩으로 표시
+// reset=true 면 (등급이 바뀐 경우) 해당 급수를 전부 선택
+function renderKankenChips(reset) {
+  const allowed = allowedKanken();
+  let active = (State.settings.active_kanken || "").split(",").map(s => s.trim()).filter(Boolean);
+  active = reset ? allowed.slice() : active.filter(g => allowed.includes(g));
+  if (active.length === 0) active = allowed.slice();
+  State.settings.active_kanken = active.join(",");
+
+  const wrap = document.getElementById("settings-kanken-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = allowed.map(g =>
+    `<button class="select-chip${active.includes(g) ? " active" : ""}" id="setting-kanken-${g}" onclick="toggleSettingKanken('${g}')">${g}</button>`
+  ).join("");
 }
 
 function toggleSettingKanken(grade) {

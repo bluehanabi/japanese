@@ -10,7 +10,7 @@ from datetime import date
 DB_PATH = "kanji_flow.db"
 DATA_FILE = os.path.join(os.path.dirname(__file__), "anki_cards.json")
 # 데이터 버전 — 이 값이 바뀌면 배포 시 카드 DB를 자동으로 재생성한다.
-DATA_VERSION = "anki-jlpt-2025-09b"
+DATA_VERSION = "anki-jlpt-2025-09c"
 
 
 def get_db():
