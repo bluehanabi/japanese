@@ -1,0 +1,42 @@
+name: Deploy to Mac server
+
+# 푸시할 때마다, 또는 Actions 탭에서 수동으로 배포
+on:
+  push:
+    branches: [claude/pensive-ramanujan-n57KJ]
+    paths:
+      - "kanji-flow-v2/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      # 1) 맥북으로 앱 파일 전송 (맥북은 GitHub 인증이 필요 없음)
+      - name: 맥북으로 파일 전송 (SCP)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASS }}
+          source: "kanji-flow-v2/**"
+          target: "~/japanese"
+          overwrite: true
+
+      # 2) 맥북에서 서버 재시작
+      - name: 맥북에서 서버 재시작 (SSH)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          password: ${{ secrets.DEPLOY_PASS }}
+          script: |
+            cd ~/japanese/kanji-flow-v2
+            bash serve.sh --bg
+            echo "배포 완료: http://192.168.10.35:8005"
