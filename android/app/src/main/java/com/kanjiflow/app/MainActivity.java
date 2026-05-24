@@ -16,6 +16,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private boolean triedFallback = false;
+    private long pausedAt = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -27,6 +28,8 @@ public class MainActivity extends Activity {
         ws.setDomStorageEnabled(true);
         // TTS 등 미디어 자동재생 허용
         ws.setMediaPlaybackRequiresUserGesture(false);
+        // 항상 서버에서 최신본을 불러오도록 캐시 사용 안 함 (업데이트 반영)
+        ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
@@ -56,6 +59,21 @@ public class MainActivity extends Activity {
             return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        pausedAt = System.currentTimeMillis();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 앱을 잠깐이 아니라 한동안(20초 이상) 떠났다가 돌아오면 최신본으로 새로고침
+        if (pausedAt > 0 && System.currentTimeMillis() - pausedAt > 20000 && web != null) {
+            web.reload();
+        }
     }
 
     @Override

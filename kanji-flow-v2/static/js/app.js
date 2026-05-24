@@ -1282,8 +1282,15 @@ function stripFurigana(s) {
 function cardTTSText(card) {
   if (!card) return "";
   if (card.type === "kanji") {
-    // "음독: イチ / 훈독: ひと" → 라벨 떼고 가나만
-    return (card.back_reading || "").replace(/음독:|훈독:/g, "").replace(/\//g, " ").trim();
+    // 음독·훈독을 전부 읽으면 길어서 → 첫 음독 + 첫 훈독만
+    const r = card.back_reading || "";
+    const clean = s => (s.split("・")[0] || "").replace(/[*\-]/g, "").replace(/[（）()]/g, "").trim();
+    const onM = r.match(/음독:\s*([^/]+)/);
+    const kunM = r.match(/훈독:\s*(.+)/);
+    const parts = [];
+    if (onM) { const t = clean(onM[1]); if (t) parts.push(t); }
+    if (kunM) { const t = clean(kunM[1]); if (t) parts.push(t); }
+    return parts.join("、") || card.front;
   }
   if (card.type === "grammar") {
     const ex = card.extra_info && card.extra_info.examples && card.extra_info.examples[0];

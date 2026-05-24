@@ -124,14 +124,19 @@ class KanjiCanvas {
   }
 
   // 사용자 획만 흰 배경 위에 합성해 PNG dataURL 로 반환 (AI 채점용, 가이드 제외)
-  exportInk() {
+  // maxSize 로 축소해 전송량↓·채점속도↑
+  exportInk(maxSize = 256) {
+    const sw = this.draw.width, sh = this.draw.height;
+    const scale = Math.min(1, maxSize / Math.max(sw, sh));
+    const tw = Math.max(1, Math.round(sw * scale));
+    const th = Math.max(1, Math.round(sh * scale));
     const tmp = document.createElement("canvas");
-    tmp.width = this.draw.width;
-    tmp.height = this.draw.height;
+    tmp.width = tw;
+    tmp.height = th;
     const t = tmp.getContext("2d");
     t.fillStyle = "#ffffff";
-    t.fillRect(0, 0, tmp.width, tmp.height);
-    t.drawImage(this.draw, 0, 0);
+    t.fillRect(0, 0, tw, th);
+    t.drawImage(this.draw, 0, 0, tw, th);
     return tmp.toDataURL("image/png");
   }
 

@@ -996,7 +996,8 @@ def ai_score_writing():
     api_key = get_setting("gemini_api_key", "")
     if not api_key:
         return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
-    model = get_setting("gemini_model", "gemini-3.5-flash")
+    # 채점은 단순 인식 작업 → 빠른 lite 모델 사용 (3.5-flash 대비 ~5배 빠름)
+    model = get_setting("gemini_vision_model", "gemini-flash-lite-latest")
 
     prompt = (
         f"이미지는 학습자가 손으로 쓴 일본어 한자야. 목표 한자는 '{target}'({meaning})야. "
