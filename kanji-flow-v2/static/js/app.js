@@ -940,7 +940,8 @@ function showQuizReveal(q, isCorrect) {
     <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}</div>
     <div class="reveal-front">${escapeHtml(info.front || q.prompt)}</div>
     ${info.reading ? `<div class="reveal-reading">${escapeHtml(info.reading)}</div>` : ""}
-    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(info.meaning)}</div>` : ""}`;
+    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(info.meaning)}</div>` : ""}
+    <button class="tts-btn" style="margin-top:10px" onclick="speakQuizReveal()">🔊 발음</button>`;
   el.style.display = "block";
 
   const nb = document.getElementById("quiz-next-btn");
@@ -950,6 +951,14 @@ function showQuizReveal(q, isCorrect) {
 
 function quizNext() {
   showQuizQuestion(State.quiz.index + 1);
+}
+
+function speakQuizReveal() {
+  const q = State.quiz.questions[State.quiz.index];
+  if (!q) return;
+  const info = q.info || {};
+  const r = (info.reading || "").replace(/음독:|훈독:/g, "").replace(/\//g, " ").trim();
+  speak(r || info.front);
 }
 
 function showQuizComplete() {
@@ -997,6 +1006,39 @@ async function apiFetch(path, method = "GET", body = null) {
     console.error(`API 오류 [${path}]:`, e);
     return {};
   }
+}
+
+// ── TTS 발음 (가나 기반으로 정확하게) ──────────────────
+function speak(text) {
+  if (!text || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP";
+  u.rate = 0.9;
+  window.speechSynthesis.speak(u);
+}
+
+// 후리가나 괄호 제거: 鈴木(すずき) → 鈴木
+function stripFurigana(s) {
+  return (s || "").replace(/[（(][ぁ-んァ-ヴー・]+[）)]/g, "");
+}
+
+// 카드 타입별로 TTS에 넘길 텍스트(가능하면 가나)를 만든다
+function cardTTSText(card) {
+  if (!card) return "";
+  if (card.type === "kanji") {
+    // "음독: イチ / 훈독: ひと" → 라벨 떼고 가나만
+    return (card.back_reading || "").replace(/음독:|훈독:/g, "").replace(/\//g, " ").trim();
+  }
+  if (card.type === "grammar") {
+    const ex = card.extra_info && card.extra_info.examples && card.extra_info.examples[0];
+    return ex ? stripFurigana(ex.jp) : card.front;
+  }
+  return card.back_reading || card.front;   // 단어: 루비(가나) 우선
+}
+
+function speakCurrentCard() {
+  speak(cardTTSText(State.study.queue[State.study.index]));
 }
 
 function escapeHtml(s) {

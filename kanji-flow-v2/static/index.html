@@ -139,8 +139,11 @@
           <div class="card-back-kanji" id="card-back-kanji"></div>
           <div class="card-back-meaning" id="card-back-meaning"></div>
           <div class="card-back-reading" id="card-back-reading"></div>
-          <button class="write-inline-btn" id="card-write-btn"
-                  onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
+          <div class="card-back-actions">
+            <button class="tts-btn" onclick="event.stopPropagation(); speakCurrentCard()">🔊 발음</button>
+            <button class="write-inline-btn" id="card-write-btn"
+                    onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
+          </div>
           <div class="card-divider"></div>
           <div class="card-words" id="card-back-words"></div>
         </div>

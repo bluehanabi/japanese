@@ -1622,3 +1622,26 @@ html, body {
 
 /* 漢検 급수 배지 */
 .badge-kanken { background: rgba(16,185,129,0.15); color: #34d399; }
+
+/* ── TTS 발음 버튼 ───────────────────────────────────── */
+.card-back-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.tts-btn {
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-active);
+  background: rgba(34,211,238,0.12);
+  color: var(--cyan);
+  font-family: var(--font-kr);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tts-btn:active { transform: scale(0.96); }
+.card-back-actions .write-inline-btn { margin-top: 0; }
