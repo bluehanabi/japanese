@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kanji Flow - 초급 일본어 한자 마스터</title>
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="초급 일본어 학습자를 위한 스마트 한자 학습 앱. 한자 쓰기 연습, 파생 단어 학습, 무제한 랜덤 퀴즈, 그리고 즐겨 듣는 노래 가사 속 한자 추출 연습까지 지원합니다.">
+  
+  <!-- CSS Stylesheets -->
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="header-content">
+      <div class="logo" id="logo-btn">
+        <i data-lucide="sparkles"></i> Kanji Flow
+      </div>
+      <div class="nav-stats">
+        <div class="stat-chip" title="학습 완료한 한자 수">
+          <i data-lucide="book-open"></i> <span id="header-stat-studied">0</span> / <span id="header-stat-total">85</span>
+        </div>
+        <div class="stat-chip" title="퀴즈 정답률">
+          <i data-lucide="award"></i> <span id="header-stat-accuracy">0%</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="app-container">
+
+    <!-- ==========================================
+         1. DASHBOARD SCREEN (Home)
+         ========================================== -->
+    <section id="screen-dashboard" class="screen active">
+      <div class="hero-section">
+        <h1>한자 공부의 흐름을 타다</h1>
+        <p class="hero-subtitle">히라가나를 넘어 일본어 한자를 쓰는 즐거움과 노래 가사로 실전처럼 익히는 스마트 훈련소</p>
+      </div>
+
+      <div class="menu-grid">
+        <div class="menu-card" onclick="switchTab('write')">
+          <div class="menu-icon"><i data-lucide="edit-3"></i></div>
+          <h3>한자 쓰기 연습</h3>
+          <p>화면 캔버스에 직접 획을 그어가며 획순 격자 가이드와 함께 쓰기를 마스터합니다.</p>
+        </div>
+
+        <div class="menu-card" onclick="switchTab('explorer')">
+          <div class="menu-icon"><i data-lucide="compass"></i></div>
+          <h3>파생 단어 탐색기</h3>
+          <p>한자에서 파생된 기초 단어들을 살펴보고 원어민 음성(TTS)으로 발음을 직접 확인합니다.</p>
+        </div>
+
+        <div class="menu-card" onclick="switchTab('quiz')">
+          <div class="menu-icon"><i data-lucide="target"></i></div>
+          <h3>랜덤 맞추기 퀴즈</h3>
+          <p>음독, 훈독, 한글 뜻을 종합적으로 평가하는 4지선다형 퀴즈로 학습 내용을 점검합니다.</p>
+        </div>
+
+        <div class="menu-card" onclick="switchTab('lyrics')">
+          <div class="menu-icon"><i data-lucide="music-4"></i></div>
+          <h3>J-Pop 가사 분석기</h3>
+          <p>좋아하는 노래 가사를 입력해 그 안의 한자들만 선별해 집중 공부하고 맞춤 퀴즈를 생성합니다.</p>
+        </div>
+      </div>
+
+      <div class="quick-stats glass-panel">
+        <h3 style="margin-bottom: 12px; font-size: 1rem;"><i data-lucide="bar-chart-2" style="vertical-align: middle; margin-right: 6px;"></i>오늘의 내 학습 요약</h3>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%;">
+          <div class="stat-item">
+            <div class="stat-value" id="stats-total-read">0</div>
+            <div class="stat-label">조회한 한자 수</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stats-quiz-taken">0</div>
+            <div class="stat-label">푼 퀴즈 수</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stats-songs-analyzed">0</div>
+            <div class="stat-label">분석한 노래 수</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         2. WRITE PRACTICE SCREEN
+         ========================================== -->
+    <section id="screen-write" class="screen">
+      <div class="practice-container">
+        <!-- Sidebar: Kanji list -->
+        <div class="kanji-sidebar">
+          <div class="sidebar-header">
+            <span>한자 선택</span>
+            <div class="level-selector">
+              <button class="level-btn active" onclick="filterSidebar('ALL')">전체</button>
+              <button class="level-btn" onclick="filterSidebar('N5')">N5</button>
+              <button class="level-btn" onclick="filterSidebar('N4')">N4</button>
+            </div>
+          </div>
+          <div class="kanji-list" id="sidebar-kanji-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Canvas Drawing and Details -->
+        <div class="canvas-panel">
+          <div class="glass-panel canvas-card">
+            <div style="display: flex; justify-content: space-between; width: 100%; max-width: 350px; align-items: center; margin-bottom: 8px;">
+              <h2 id="draw-kanji-title" style="font-family: var(--font-jp); font-size: 1.8rem; color: white;">日</h2>
+              <div style="display: flex; gap: 8px;">
+                <button class="btn-icon" onclick="playCurrentKanjiSpeech()" title="발음 듣기"><i data-lucide="volume-2"></i></button>
+                <button class="btn-icon" id="toggle-guide-btn" onclick="toggleCanvasGuide()" title="배경 가이드 끄기/켜기"><i data-lucide="eye"></i></button>
+                <button class="btn-icon" id="toggle-grid-btn" onclick="toggleCanvasGrid()" title="십자 보조선 끄기/켜기"><i data-lucide="grid"></i></button>
+              </div>
+            </div>
+            
+            <div class="canvas-wrapper">
+              <canvas id="kanji-canvas" width="350" height="350"></canvas>
+            </div>
+
+            <div class="canvas-controls">
+              <button class="btn btn-secondary" onclick="clearDrawCanvas()"><i data-lucide="trash-2"></i> 지우기</button>
+              <button class="btn btn-primary" onclick="checkKanjiSuccess()"><i data-lucide="check"></i> 연습 완료</button>
+            </div>
+
+            <div class="canvas-details-panel">
+              <div class="details-row">
+                <div class="details-label">한국어 뜻</div>
+                <div class="details-val" id="draw-detail-meaning" style="font-weight: 600;">날/해</div>
+              </div>
+              <div class="details-row">
+                <div class="details-label">음독 (音)</div>
+                <div class="details-val onyomi-val" id="draw-detail-onyomi">ニチ, ジツ</div>
+              </div>
+              <div class="details-row">
+                <div class="details-label">훈독 (訓)</div>
+                <div class="details-val kunyomi-val" id="draw-detail-kunyomi">ひ, -び</div>
+              </div>
+              <div class="details-row" style="flex-direction: column; border: none; padding-bottom: 0;">
+                <div class="details-label" style="width: 100%; margin-bottom: 8px;">주요 파생 단어</div>
+                <div class="card-word-list" id="draw-detail-words" style="width: 100%;">
+                  <!-- Word items -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         3. VOCABULARY EXPLORER SCREEN
+         ========================================== -->
+    <section id="screen-explorer" class="screen">
+      <div class="glass-panel" style="margin-bottom: 16px;">
+        <h2 style="font-size: 1.25rem; margin-bottom: 16px;"><i data-lucide="search" style="vertical-align: middle; margin-right: 6px;"></i>파생 단어 도서관</h2>
+        <div class="search-bar-wrapper">
+          <div class="search-input-container">
+            <i data-lucide="search"></i>
+            <input type="text" id="explorer-search-input" class="search-input" placeholder="한자, 뜻, 독음, 단어 검색..." oninput="onSearchInput()">
+          </div>
+          <div class="level-selector" style="align-items: center;">
+            <button class="level-btn active" id="exp-lvl-ALL" onclick="filterExplorer('ALL')" style="padding: 10px 14px;">전체</button>
+            <button class="level-btn" id="exp-lvl-N5" onclick="filterExplorer('N5')" style="padding: 10px 14px;">N5</button>
+            <button class="level-btn" id="exp-lvl-N4" onclick="filterExplorer('N4')" style="padding: 10px 14px;">N4</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="explorer-grid" id="explorer-kanji-grid">
+        <!-- Populate dynamically -->
+      </div>
+    </section>
+
+    <!-- ==========================================
+         4. RANDOM QUIZ SCREEN
+         ========================================== -->
+    <section id="screen-quiz" class="screen">
+      <div class="quiz-wrapper">
+        <div class="quiz-progress-bar">
+          <div class="quiz-progress-fill" id="quiz-progress"></div>
+        </div>
+
+        <!-- Quiz Screen State: Setup -->
+        <div id="quiz-setup-panel" class="glass-panel">
+          <div style="font-size: 3rem; margin-bottom: 16px;"><i data-lucide="help-circle" style="color: var(--color-violet)"></i></div>
+          <h2 style="font-size: 1.4rem; margin-bottom: 10px;">한자 맞추기 랜덤 퀴즈</h2>
+          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 24px;">학습하신 N5, N4 한자와 그 파생 단어들을 임의로 출제합니다. 10문제 단위로 학습 능력을 평가해 보세요.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+            <button class="btn btn-primary" onclick="startQuiz('ALL')">전체 한자 퀴즈 시작 (10문항)</button>
+            <button class="btn btn-secondary" onclick="startQuiz('N5')">N5 입문 한자 퀴즈</button>
+            <button class="btn btn-secondary" onclick="startQuiz('N4')">N4 초급 한자 퀴즈</button>
+          </div>
+        </div>
+
+        <!-- Quiz Screen State: Playing -->
+        <div id="quiz-play-panel" class="glass-panel quiz-card" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span class="badge badge-n5" id="quiz-card-level">N5</span>
+            <span id="quiz-card-counter" style="font-size: 0.85rem; color: var(--text-secondary);">1 / 10</span>
+          </div>
+
+          <div class="quiz-question-label" id="quiz-question-type">뜻 맞추기</div>
+          <div class="quiz-question" id="quiz-question-content">水</div>
+          <div class="quiz-question-desc" id="quiz-question-sub">아래 보기에서 올바른 한국어 뜻을 선택하세요.</div>
+
+          <div class="quiz-options-grid" id="quiz-options-container">
+            <!-- 4 Options button dynamically created -->
+          </div>
+
+          <div class="quiz-feedback" id="quiz-feedback-text"></div>
+        </div>
+
+        <!-- Quiz Screen State: Summary -->
+        <div id="quiz-result-panel" class="glass-panel" style="display: none;">
+          <div class="quiz-score-summary">
+            <h2 style="font-size: 1.4rem;">퀴즈 완료!</h2>
+            <div class="score-radial" id="quiz-score-radial">
+              <span id="quiz-score-text">8 / 10</span>
+            </div>
+            <p id="quiz-result-msg" style="color: var(--text-secondary); font-size: 0.9rem;">참 잘했습니다! 기초를 단단히 다지고 있네요.</p>
+            
+            <div style="display: flex; gap: 12px; width: 100%; margin-top: 16px;">
+              <button class="btn btn-secondary" style="flex: 1;" onclick="resetQuizSetup()">메인으로</button>
+              <button class="btn btn-primary" style="flex: 1;" id="quiz-retry-btn" onclick="retryCurrentQuiz()">다시 도전</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==========================================
+         5. LYRICS ANALYZER SCREEN
+         ========================================== -->
+    <section id="screen-lyrics" class="screen">
+      <div class="glass-panel">
+        <h2 style="font-size: 1.25rem; margin-bottom: 12px;"><i data-lucide="music-4" style="vertical-align: middle; margin-right: 6px; color: var(--color-cyan);"></i>J-Pop 가사 속 한자 추출기</h2>
+        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px;">
+          좋아하는 일본 노래 가사를 아래 상자에 붙여넣어 보세요! 가사에 포함된 모든 한자를 분석하여 우리 앱 사전 데이터와 맞춤 분류해주고, 해당 가사의 한자로만 집중 퀴즈를 치를 수 있습니다.
+        </p>
+
+        <textarea id="lyrics-input" class="lyrics-input-area" placeholder="여기에 일본어 노래 가사를 붙여넣으세요... (예: Lemon, Pretender 등)"></textarea>
+
+        <div class="song-samples">
+          <span style="font-size: 0.8rem; color: var(--text-secondary); display: flex; align-items: center;">샘플 가사 입력:</span>
+          <button class="sample-chip" onclick="loadSampleLyrics('lemon')">Lemon - 米津玄師</button>
+          <button class="sample-chip" onclick="loadSampleLyrics('idol')">アイドル - YOASOBI</button>
+          <button class="sample-chip" onclick="loadSampleLyrics('pretender')">Pretender - Official髭男dism</button>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+          <button class="btn btn-secondary" onclick="clearLyricsInput()"><i data-lucide="rotate-ccw"></i> 초기화</button>
+          <button class="btn btn-primary" onclick="analyzeLyrics()"><i data-lucide="sparkles"></i> 가사 분석하기</button>
+        </div>
+      </div>
+
+      <!-- Analysis Results Panel -->
+      <div class="analysis-result-panel" id="lyrics-result-panel">
+        <div class="glass-panel">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <h3 style="font-size: 1.1rem; color: white;"><i data-lucide="bar-chart-3" style="vertical-align: middle; margin-right: 6px;"></i>가사 분석 결과</h3>
+            <button class="btn btn-primary btn-sm" id="lyrics-quiz-btn" onclick="startLyricsCustomQuiz()"><i data-lucide="play-circle"></i> 이 가사 한자들로 퀴즈 시작하기</button>
+          </div>
+
+          <div class="lyrics-stats">
+            <div class="lyrics-stat-card">
+              <div class="lyrics-stat-num registered" id="lyric-stat-registered">0</div>
+              <div class="stat-label">사전에 등록된 기초 한자</div>
+            </div>
+            <div class="lyrics-stat-card">
+              <div class="lyrics-stat-num unregistered" id="lyric-stat-unregistered">0</div>
+              <div class="stat-label">기타/미등록 한자</div>
+            </div>
+          </div>
+
+          <!-- Section A: Registered Kanji -->
+          <div class="lyrics-kanji-section-title">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-cyan); box-shadow: 0 0 6px var(--color-cyan);"></span>
+            학습 가능한 기초 한자 (사전 매칭됨 - 클릭 시 세부 학습/발음 지원)
+          </div>
+          <div class="lyrics-kanji-grid" id="lyrics-registered-grid">
+            <!-- Dynamically populated -->
+          </div>
+
+          <!-- Section B: Unregistered Kanji -->
+          <div class="lyrics-kanji-section-title">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted);"></span>
+            고급/미등록 한자 (클릭 시 네이버 일본어 사전 링크 제공)
+          </div>
+          <div class="lyrics-kanji-grid" id="lyrics-unregistered-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Navigation Bar (Floating footer style) -->
+  <nav class="bottom-nav">
+    <div class="nav-item active" id="nav-dashboard" onclick="switchTab('dashboard')">
+      <i data-lucide="layout-dashboard"></i>
+      <span>홈</span>
+    </div>
+    <div class="nav-item" id="nav-write" onclick="switchTab('write')">
+      <i data-lucide="edit-3"></i>
+      <span>한자 쓰기</span>
+    </div>
+    <div class="nav-item" id="nav-explorer" onclick="switchTab('explorer')">
+      <i data-lucide="compass"></i>
+      <span>단어장</span>
+    </div>
+    <div class="nav-item" id="nav-quiz" onclick="switchTab('quiz')">
+      <i data-lucide="target"></i>
+      <span>퀴즈</span>
+    </div>
+    <div class="nav-item" id="nav-lyrics" onclick="switchTab('lyrics')">
+      <i data-lucide="music-4"></i>
+      <span>가사공부</span>
+    </div>
+  </nav>
+
+  <!-- Lyrics Detailed Modal (For showing registered Kanji information) -->
+  <div class="lyrics-modal" id="kanji-modal">
+    <div class="modal-content">
+      <button class="modal-close" onclick="closeKanjiModal()"><i data-lucide="x"></i></button>
+      <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 20px;">
+        <div id="modal-kanji-char" style="font-size: 3.5rem; font-weight: 700; font-family: var(--font-jp); background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: var(--border-radius-md);">水</div>
+        <div>
+          <h3 id="modal-kanji-meaning" style="font-size: 1.3rem;">물</h3>
+          <span class="badge badge-n5" id="modal-kanji-level" style="margin-top: 4px;">N5</span>
+        </div>
+        <button class="btn-icon" style="margin-left: auto;" onclick="playModalKanjiSpeech()" title="발음 듣기"><i data-lucide="volume-2"></i></button>
+      </div>
+
+      <div class="canvas-details-panel">
+        <div class="details-row">
+          <div class="details-label">음독 (音)</div>
+          <div class="details-val onyomi-val" id="modal-kanji-onyomi">スイ</div>
+        </div>
+        <div class="details-row">
+          <div class="details-label">훈독 (訓)</div>
+          <div class="details-val kunyomi-val" id="modal-kanji-kunyomi">みず</div>
+        </div>
+        <div class="details-row" style="flex-direction: column; border: none; padding-bottom: 0;">
+          <div class="details-label" style="width: 100%; margin-bottom: 8px;">파생 단어</div>
+          <div class="card-word-list" id="modal-kanji-words">
+            <!-- Word lists -->
+          </div>
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closeKanjiModal()">닫기</button>
+        <button class="btn btn-primary" style="flex: 1;" onclick="goToWriteTabFromModal()">✍️ 직접 쓰기 연습</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confetti script -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Application scripts -->
+  <script src="js/kanji-data.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

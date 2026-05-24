@@ -1,0 +1,10 @@
+# Global Instructions for AntigravitY
+
+## Language Settings
+- **Language**: Always respond, explain, and converse in Korean (한국어).
+- **Descriptions**: Explain all code changes, command executions, and logic details clearly and friendly in Korean.
+- **Terminal/Command Outputs**: Help prevent encoding issues in the terminal by ensuring outputs are readable, and translate/explain command outputs in Korean.
+
+## Development Preferences
+- Maintain codebase consistency.
+- Explain technical choices and logic before making changes when requested.

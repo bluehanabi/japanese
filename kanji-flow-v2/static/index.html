@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#0d0f14"/>
+  <title>Kanji Flow 2.0</title>
+  <meta name="description" content="SM-2 간격 반복 알고리즘 기반 일본어 한자/단어 학습 앱"/>
+  <link rel="stylesheet" href="/css/style.css"/>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════════════════════════════════════
+       홈 대시보드
+  ══════════════════════════════════════════ -->
+  <div id="home-view" class="view active">
+    <div class="home-header">
+      <div class="home-greeting" id="home-greeting">오늘도 화이팅! 👋</div>
+      <h1 class="home-title">Kanji <span>Flow</span></h1>
+    </div>
+
+    <!-- 오늘의 요약 -->
+    <div class="summary-card animate-in">
+      <div class="summary-label">오늘의 학습</div>
+      <div class="summary-stats">
+        <div class="summary-stat">
+          <div class="stat-num accent" id="home-due">—</div>
+          <div class="stat-label">복습할 카드</div>
+        </div>
+        <div class="summary-stat">
+          <div class="stat-num" id="home-new">—</div>
+          <div class="stat-label">새 카드</div>
+        </div>
+        <div class="summary-stat">
+          <div class="stat-num" id="home-done">—</div>
+          <div class="stat-label">오늘 완료</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 학습 시작 버튼 -->
+    <button class="start-btn" id="start-study-btn" onclick="startStudy()">
+      <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+        <path d="M5 3l14 9-14 9V3z" fill="white"/>
+      </svg>
+      지금 바로 학습 시작
+    </button>
+
+    <!-- 연속 학습 -->
+    <div class="section">
+      <div class="streak-badge animate-in" style="animation-delay:0.1s">
+        <div class="streak-fire">🔥</div>
+        <div class="streak-info">
+          <div class="streak-days"><span id="home-streak">0</span>일 연속</div>
+          <div class="streak-label">매일매일 꾸준히 학습 중</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 카드 상태 분포 -->
+    <div class="section">
+      <div class="section-title">학습 현황</div>
+      <div class="state-bar-wrap animate-in" style="animation-delay:0.15s">
+        <div class="state-bar">
+          <div class="state-bar-seg new"      id="bar-new"      style="flex:1"></div>
+          <div class="state-bar-seg learning" id="bar-learning" style="flex:0"></div>
+          <div class="state-bar-seg mastered" id="bar-mastered" style="flex:0"></div>
+        </div>
+        <div class="state-legend">
+          <div class="legend-item">
+            <div class="legend-dot new"></div>
+            <span>신규 <b id="cnt-new">—</b></span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot learning"></div>
+            <span>학습 중 <b id="cnt-learning">—</b></span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot mastered"></div>
+            <span>마스터 <b id="cnt-mastered">—</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       학습 화면 (플래시카드)
+  ══════════════════════════════════════════ -->
+  <div id="study-view" class="view">
+
+    <!-- 학습 중 헤더 -->
+    <div class="study-header">
+      <div class="card-type-badge badge-kanji" id="study-type-badge">한자</div>
+      <div class="study-progress-wrap">
+        <div class="study-progress-bar">
+          <div class="study-progress-fill" id="study-progress" style="width:0%"></div>
+        </div>
+        <div class="study-progress-text" id="study-progress-text">0 / 0</div>
+      </div>
+      <div class="study-close" onclick="endStudy()">✕</div>
+    </div>
+
+    <!-- 플래시카드 -->
+    <div class="flashcard-scene" id="flashcard-scene" onclick="flipCard()">
+      <div class="flashcard" id="flashcard">
+        <!-- 앞면 -->
+        <div class="card-face card-front">
+          <div class="card-type-badge" id="front-level-badge">N5</div>
+          <div class="card-main-text" id="card-front-text">日</div>
+          <div class="card-hint card-tap-hint">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/>
+            </svg>
+            탭하여 정답 확인
+          </div>
+        </div>
+        <!-- 뒷면 -->
+        <div class="card-face card-back">
+          <div class="card-back-kanji" id="card-back-kanji"></div>
+          <div class="card-back-meaning" id="card-back-meaning"></div>
+          <div class="card-back-reading" id="card-back-reading"></div>
+          <div class="card-divider"></div>
+          <div class="card-words" id="card-back-words"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 평가 버튼 -->
+    <div class="rating-wrap" id="rating-wrap">
+      <div class="rating-label">얼마나 잘 기억했나요?</div>
+      <div class="rating-buttons">
+        <button class="rating-btn again" onclick="submitRating('again')">
+          <span class="btn-emoji">🔴</span>
+          <span class="btn-label">완전 몰랐음</span>
+          <span class="btn-interval" id="interval-again">내일</span>
+        </button>
+        <button class="rating-btn hard" onclick="submitRating('hard')">
+          <span class="btn-emoji">🟠</span>
+          <span class="btn-label">힘들었어</span>
+          <span class="btn-interval" id="interval-hard">내일</span>
+        </button>
+        <button class="rating-btn good" onclick="submitRating('good')">
+          <span class="btn-emoji">🟢</span>
+          <span class="btn-label">맞았어</span>
+          <span class="btn-interval" id="interval-good">3일</span>
+        </button>
+        <button class="rating-btn easy" onclick="submitRating('easy')">
+          <span class="btn-emoji">💙</span>
+          <span class="btn-label">완벽히 알아</span>
+          <span class="btn-interval" id="interval-easy">7일</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 학습 완료 -->
+    <div class="study-complete" id="study-complete" style="display:none">
+      <div class="complete-emoji">🎉</div>
+      <div class="complete-title">오늘 학습 완료!</div>
+      <div class="complete-sub" id="complete-sub">정말 잘 하셨어요!</div>
+      <div class="complete-stats">
+        <div class="complete-stat">
+          <div class="num" id="complete-total">0</div>
+          <div class="lbl">총 카드</div>
+        </div>
+        <div class="complete-stat">
+          <div class="num" id="complete-correct">0</div>
+          <div class="lbl">정답</div>
+        </div>
+        <div class="complete-stat">
+          <div class="num" id="complete-accuracy">0%</div>
+          <div class="lbl">정확도</div>
+        </div>
+      </div>
+      <button class="start-btn" onclick="showView('home'); loadHome();" style="margin:0">
+        홈으로 돌아가기
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       단어장 / 탐색기
+  ══════════════════════════════════════════ -->
+  <div id="vocab-view" class="view">
+    <div class="vocab-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:12px;">단어장</h2>
+      <div class="search-box">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="M21 21l-4.35-4.35"/>
+        </svg>
+        <input type="search" id="search-input" placeholder="한자, 뜻, 발음 검색..." oninput="onSearch(this.value)"/>
+      </div>
+    </div>
+
+    <!-- 필터 칩 -->
+    <div class="filter-chips">
+      <button class="chip active" id="chip-all"   onclick="setFilter('all')">전체</button>
+      <button class="chip"        id="chip-kanji" onclick="setFilter('kanji')">한자</button>
+      <button class="chip"        id="chip-word"  onclick="setFilter('word')">단어</button>
+      <button class="chip"        id="chip-n5"    onclick="setFilter('n5')">N5</button>
+      <button class="chip"        id="chip-n4"    onclick="setFilter('n4')">N4</button>
+      <button class="chip"        id="chip-n3"    onclick="setFilter('n3')">N3</button>
+      <button class="chip"        id="chip-n2"    onclick="setFilter('n2')">N2</button>
+      <button class="chip"        id="chip-n1"    onclick="setFilter('n1')">N1</button>
+      <button class="chip"        id="chip-new"   onclick="setFilter('state-new')">🆕 신규</button>
+      <button class="chip"        id="chip-learning" onclick="setFilter('state-learning')">📖 학습중</button>
+      <button class="chip"        id="chip-mastered" onclick="setFilter('state-mastered')">✅ 마스터</button>
+    </div>
+
+    <div class="card-list" id="card-list">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       통계 화면
+  ══════════════════════════════════════════ -->
+  <div id="stats-view" class="view">
+    <div class="stats-header">
+      <h2 class="stats-title">학습 통계</h2>
+    </div>
+
+    <!-- 수치 요약 -->
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-box-num indigo" id="s-total">—</div>
+        <div class="stat-box-label">총 카드</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-box-num green" id="s-mastered">—</div>
+        <div class="stat-box-label">마스터</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-box-num yellow" id="s-today-done">—</div>
+        <div class="stat-box-label">오늘 학습</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-box-num cyan" id="s-accuracy">—%</div>
+        <div class="stat-box-label">오늘 정확도</div>
+      </div>
+    </div>
+
+    <!-- 히트맵 -->
+    <div class="heatmap-wrap">
+      <div class="heatmap-title">연간 학습 기록</div>
+      <div class="heatmap-grid" id="heatmap-grid"></div>
+    </div>
+
+    <!-- 취약 카드 -->
+    <div class="weak-cards">
+      <div class="heatmap-title" style="margin-bottom:12px">취약 카드 TOP 10</div>
+      <div id="weak-cards-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       가사 분석기
+  ══════════════════════════════════════════ -->
+  <div id="lyrics-view" class="view">
+    <div class="lyrics-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:4px;">가사 분석기</h2>
+      <p style="font-size:13px;color:var(--text-secondary)">좋아하는 일본어 노래 가사의 한자를 분석합니다</p>
+    </div>
+
+    <textarea class="lyrics-textarea" id="lyrics-input"
+      placeholder="여기에 일본어 가사를 붙여넣으세요...&#10;예) 夜が明けるまで 君と歌いたい"></textarea>
+
+    <button class="analyze-btn" onclick="analyzeLyrics()">
+      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="M21 21l-4.35-4.35"/>
+      </svg>
+      한자 분석하기
+    </button>
+
+    <div class="lyrics-results" id="lyrics-results"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       설정 화면
+  ══════════════════════════════════════════ -->
+  <div id="settings-view" class="view">
+    <div class="settings-header">
+      <h2 class="settings-title">설정</h2>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">학습 설정</div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">하루 새 카드 수</div>
+          <div class="settings-item-sub">매일 새로 학습할 카드 목표량</div>
+        </div>
+        <div class="number-picker">
+          <button class="picker-btn" onclick="changeNewCards(-1)">−</button>
+          <div class="picker-val" id="setting-new-cards">10</div>
+          <button class="picker-btn" onclick="changeNewCards(1)">+</button>
+        </div>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">학습 카드 종류</div>
+          <div class="settings-item-sub">한자만 / 단어만 / 모두</div>
+        </div>
+        <div class="segment-control">
+          <button class="seg-btn active" id="seg-both"  onclick="setStudyMode('both')">모두</button>
+          <button class="seg-btn"        id="seg-kanji" onclick="setStudyMode('kanji_only')">한자</button>
+          <button class="seg-btn"        id="seg-word"  onclick="setStudyMode('word_only')">단어</button>
+        </div>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">앞면에 발음 표시</div>
+          <div class="settings-item-sub">카드 앞면에 히라가나 표시 여부</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="setting-show-reading" onchange="toggleShowReading(this.checked)"/>
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">무작위 셔플 학습</div>
+          <div class="settings-item-sub">매일 복습/신규 카드를 섞어서 출제</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="setting-shuffle-study" onchange="toggleShuffleStudy(this.checked)"/>
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+
+      <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:10px;">
+        <div>
+          <div class="settings-item-label">학습할 JLPT 등급</div>
+          <div class="settings-item-sub">복습 및 신규 학습에 포함할 등급 (다중 선택)</div>
+        </div>
+        <div class="multi-select-chips" id="settings-levels-wrap">
+          <button class="select-chip" id="setting-level-N5" onclick="toggleSettingLevel('N5')">N5</button>
+          <button class="select-chip" id="setting-level-N4" onclick="toggleSettingLevel('N4')">N4</button>
+          <button class="select-chip" id="setting-level-N3" onclick="toggleSettingLevel('N3')">N3</button>
+          <button class="select-chip" id="setting-level-N2" onclick="toggleSettingLevel('N2')">N2</button>
+          <button class="select-chip" id="setting-level-N1" onclick="toggleSettingLevel('N1')">N1</button>
+        </div>
+      </div>
+
+      <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:10px;">
+        <div>
+          <div class="settings-item-label">학습할 카테고리</div>
+          <div class="settings-item-sub">원하는 단어 카테고리를 선택 (다중 선택)</div>
+        </div>
+        <div class="multi-select-chips" id="settings-categories-wrap">
+          <button class="select-chip" id="setting-category-자연" onclick="toggleSettingCategory('자연')">자연</button>
+          <button class="select-chip" id="setting-category-사람" onclick="toggleSettingCategory('사람')">사람</button>
+          <button class="select-chip" id="setting-category-행동" onclick="toggleSettingCategory('행동')">행동</button>
+          <button class="select-chip" id="setting-category-감정" onclick="toggleSettingCategory('감정')">감정</button>
+          <button class="select-chip" id="setting-category-일상" onclick="toggleSettingCategory('일상')">일상</button>
+          <button class="select-chip" id="setting-category-지식" onclick="toggleSettingCategory('지식')">지식</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">앱 정보</div>
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">총 카드 수</div>
+          <div class="settings-item-sub">한자 카드 + 단어 카드 합계</div>
+        </div>
+        <div style="color:var(--indigo);font-weight:700" id="info-total-cards">—</div>
+      </div>
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">버전</div>
+        </div>
+        <div style="color:var(--text-secondary);font-size:13px">2.0.0</div>
+      </div>
+    </div>
+
+    <button class="save-btn" onclick="saveSettings()">설정 저장</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       하단 내비게이션
+  ══════════════════════════════════════════ -->
+  <nav id="nav">
+    <button class="nav-btn active" id="nav-home" onclick="showView('home')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6"/>
+      </svg>
+      홈
+    </button>
+    <button class="nav-btn" id="nav-vocab" onclick="showView('vocab')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+      </svg>
+      단어장
+    </button>
+    <button class="nav-btn" id="nav-stats" onclick="showView('stats')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+      통계
+    </button>
+    <button class="nav-btn" id="nav-lyrics" onclick="showView('lyrics')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
+      </svg>
+      가사
+    </button>
+    <button class="nav-btn" id="nav-settings" onclick="showView('settings')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      설정
+    </button>
+  </nav>
+
+  <!-- 토스트 알림 -->
+  <div id="toast"></div>
+
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>

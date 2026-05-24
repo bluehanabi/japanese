@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# SQLite DB (런타임 생성 — 서버 첫 실행 시 자동 생성됨)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Android 빌드 산출물
+kanji-app/build/
+kanji-app/app/build/
+kanji-app/.gradle/
+kanji-app/.kotlin/
+kanji-app/local.properties
+*.apk
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
