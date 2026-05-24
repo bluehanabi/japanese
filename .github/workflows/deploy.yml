@@ -3,7 +3,9 @@ name: Deploy to Mac server
 # 푸시할 때마다, 또는 Actions 탭에서 수동으로 배포
 on:
   push:
-    branches: [claude/pensive-ramanujan-n57KJ]
+    branches:
+      - claude/gallant-albattani-XvrfY
+      - claude/pensive-ramanujan-n57KJ
   workflow_dispatch:
 
 jobs:

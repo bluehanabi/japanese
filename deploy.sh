@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")"
 
-BRANCH="${BRANCH:-claude/pensive-ramanujan-n57KJ}"
+BRANCH="${BRANCH:-claude/gallant-albattani-XvrfY}"
 
 echo "[deploy] 최신 코드 받는 중 (브랜치: $BRANCH)"
 git fetch origin "$BRANCH"
