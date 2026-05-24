@@ -23,6 +23,24 @@ const State = {
     allCards: [],
     displayCards: [],
   },
+  writing: {
+    cards: [],
+    index: 0,
+    canvas: null,
+    showGuide: true,
+    showGrid: true,
+  },
+  quiz: {
+    questions: [],
+    index: 0,
+    correct: 0,
+    answered: false,
+    level: "",
+    count: 15,
+  },
+  lyrics: {
+    foundIds: [],
+  },
   settings: {
     daily_new_cards: 10,
     study_mode: "both",
@@ -79,9 +97,9 @@ function showView(name) {
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
 
-  // 학습 중이면 내비 숨기기
+  // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (name === "study") ? "none" : "flex";
+    (name === "study" || name === "quiz") ? "none" : "flex";
 }
 
 // ══════════════════════════════════════════════════════════
@@ -146,7 +164,8 @@ async function startStudy() {
   showView("study");
   document.getElementById("study-complete").style.display = "none";
   document.getElementById("flashcard-scene").style.display = "block";
-  document.getElementById("rating-wrap").style.display = "none";
+  // 평가 버튼은 .visible 클래스로만 제어 (인라인 display 를 쓰면 .visible 이 무시됨)
+  document.getElementById("rating-wrap").classList.remove("visible");
 
   const data = await apiFetch("/api/today") || {};
   const review_cards = data.review_cards || [];
@@ -236,22 +255,17 @@ function flipCard() {
   document.getElementById("rating-wrap").classList.add("visible");
 }
 
+function fmtDays(d) {
+  return d <= 1 ? "내일" : `${d}일`;
+}
+
 function updateIntervalHints(card) {
-  const rep = card.repetitions || 0;
-  const interval = card.interval || 0;
-  const ef = card.ease_factor || 2.5;
-
-  const hints = {
-    again: "내일",
-    hard:  "내일",
-    good:  rep === 0 ? "1일" : rep === 1 ? "6일" : `${Math.round(interval * ef)}일`,
-    easy:  rep === 0 ? "6일" : `${Math.round(interval * ef * 1.3)}일`,
-  };
-
-  document.getElementById("interval-again").textContent = hints.again;
-  document.getElementById("interval-hard").textContent  = hints.hard;
-  document.getElementById("interval-good").textContent  = hints.good;
-  document.getElementById("interval-easy").textContent  = hints.easy;
+  // 백엔드(srs.py)가 계산해 내려준 예상 간격을 그대로 표시 → 항상 실제와 일치
+  const h = card.hints || { again: 1, hard: 1, good: 1, easy: 4 };
+  document.getElementById("interval-again").textContent = fmtDays(h.again);
+  document.getElementById("interval-hard").textContent  = fmtDays(h.hard);
+  document.getElementById("interval-good").textContent  = fmtDays(h.good);
+  document.getElementById("interval-easy").textContent  = fmtDays(h.easy);
 }
 
 async function submitRating(answer) {
@@ -350,6 +364,7 @@ function applyFilter(cards, filter) {
 
 function renderCardList(cards) {
   const listEl = document.getElementById("card-list");
+  State.vocab.displayCards = cards;
 
   if (cards.length === 0) {
     listEl.innerHTML = `
@@ -389,9 +404,10 @@ function onSearch(query) {
 }
 
 function openCardDetail(id) {
-  // 카드 상세 — 학습 시작
-  // 추후 모달 구현 예정. 지금은 해당 카드를 즉시 학습 세션으로
-  showToast("곧 카드 상세 기능이 추가될 예정이에요!");
+  // 단어장에서 카드를 누르면 해당 글자 쓰기 연습 열기
+  const card = State.vocab.allCards.find(c => c.id === id)
+            || (State.vocab.displayCards || []).find(c => c.id === id);
+  if (card) openWriting([card], 0);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -475,21 +491,30 @@ async function analyzeLyrics() {
 
   const data = await apiFetch("/api/lyrics/analyze", "POST", { text });
 
-  if (data.found === 0) {
+  if (!data.found) {
+    State.lyrics.foundIds = [];
     resultsEl.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
         <div class="empty-text">인식된 한자가 없어요</div>
-        <div class="empty-sub">DB에 등록된 한자 ${data.not_in_db}개가 있지만 아직 학습 목록에 없어요</div>
+        <div class="empty-sub">학습 DB에 등록된 한자가 가사에 없네요${data.not_in_db ? ` (미등록 ${data.not_in_db}자)` : ""}</div>
       </div>`;
     return;
   }
 
+  // 가사 퀴즈 / 쓰기 연습에 쓸 카드 보관
+  State.lyrics.foundIds = data.kanji.map(k => k.id);
+  State.lyrics.foundCards = data.kanji;
+
   resultsEl.innerHTML = `
     <div class="result-summary">가사에서 <b style="color:var(--indigo)">${data.found}개</b>의 한자를 찾았어요!</div>
+    <div class="lyrics-actions">
+      <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>이 한자로 퀴즈</span></button>
+      <button class="action-btn" onclick="openWriting(State.lyrics.foundCards, 0)"><span class="action-emoji">✍️</span><span>쓰기 연습</span></button>
+    </div>
     <div class="result-kanji-grid">
-      ${data.kanji.map(k => `
-        <div class="result-kanji-card" onclick="showToast('${k.front}: ${k.back_meaning}')">
+      ${data.kanji.map((k, i) => `
+        <div class="result-kanji-card" onclick="openWriting(State.lyrics.foundCards, ${i})">
           <div class="result-kanji-char">${k.front}</div>
           <div class="result-kanji-meaning">${k.back_meaning}</div>
           <div class="result-kanji-state ${k.state}"></div>
@@ -619,6 +644,232 @@ async function saveSettings() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  한자 쓰기 연습
+// ══════════════════════════════════════════════════════════
+
+function openWriting(cards, index = 0) {
+  if (!cards || cards.length === 0) {
+    showToast("연습할 카드가 없어요");
+    return;
+  }
+  State.writing.cards = cards;
+  State.writing.index = index;
+
+  document.getElementById("writing-overlay").classList.add("open");
+  document.getElementById("writing-nav").style.display =
+    cards.length > 1 ? "flex" : "none";
+
+  // 캔버스는 오버레이가 보인 뒤 크기를 잡아야 정확함
+  requestAnimationFrame(() => {
+    if (!State.writing.canvas) {
+      State.writing.canvas = new KanjiCanvas("writing-canvas");
+    } else {
+      State.writing.canvas.resize();
+    }
+    renderWritingCard();
+  });
+}
+
+function renderWritingCard() {
+  const w = State.writing;
+  const card = w.cards[w.index];
+  if (!card) return;
+
+  document.getElementById("writing-meaning").textContent = card.back_meaning || card.front;
+  document.getElementById("writing-reading").textContent = card.back_reading || "";
+  document.getElementById("writing-count").textContent = `${w.index + 1} / ${w.cards.length}`;
+
+  if (w.canvas) {
+    w.canvas.showGuide = w.showGuide;
+    w.canvas.showGrid = w.showGrid;
+    w.canvas.setGuideKanji(card.front);
+  }
+}
+
+function openWritingForCurrent() {
+  const card = State.study.queue[State.study.index];
+  if (card) openWriting([card], 0);
+}
+
+async function openWritingFromHome() {
+  const data = await apiFetch("/api/cards?type=kanji&per_page=1000");
+  const cards = (data.cards || []);
+  if (!cards.length) { showToast("한자 카드를 불러오지 못했어요"); return; }
+  openWriting(cards, 0);
+}
+
+function closeWriting() {
+  document.getElementById("writing-overlay").classList.remove("open");
+}
+
+function clearWriting() {
+  if (State.writing.canvas) State.writing.canvas.clear();
+}
+
+function toggleWriteGuide() {
+  State.writing.showGuide = !State.writing.showGuide;
+  if (State.writing.canvas) State.writing.canvas.toggleGuide(State.writing.showGuide);
+  document.getElementById("wc-guide").textContent =
+    State.writing.showGuide ? "가이드 끄기" : "가이드 켜기";
+  document.getElementById("wc-guide").classList.toggle("off", !State.writing.showGuide);
+}
+
+function toggleWriteGrid() {
+  State.writing.showGrid = !State.writing.showGrid;
+  if (State.writing.canvas) State.writing.canvas.toggleGrid(State.writing.showGrid);
+  document.getElementById("wc-grid").textContent =
+    State.writing.showGrid ? "격자 끄기" : "격자 켜기";
+  document.getElementById("wc-grid").classList.toggle("off", !State.writing.showGrid);
+}
+
+function writingNext() {
+  const w = State.writing;
+  w.index = (w.index + 1) % w.cards.length;
+  renderWritingCard();
+}
+
+function writingPrev() {
+  const w = State.writing;
+  w.index = (w.index - 1 + w.cards.length) % w.cards.length;
+  renderWritingCard();
+}
+
+// ══════════════════════════════════════════════════════════
+//  랜덤 사지선다 퀴즈
+// ══════════════════════════════════════════════════════════
+
+function openQuizSetup() {
+  document.getElementById("quiz-setup-overlay").classList.add("open");
+}
+function closeQuizSetup() {
+  document.getElementById("quiz-setup-overlay").classList.remove("open");
+}
+
+function pickQuizLevel(btn, level) {
+  State.quiz.level = level;
+  document.querySelectorAll("#quiz-level-chips .select-chip").forEach(c => c.classList.remove("active"));
+  btn.classList.add("active");
+}
+function pickQuizCount(btn, n) {
+  State.quiz.count = n;
+  document.querySelectorAll("#quiz-count-chips .select-chip").forEach(c => c.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+async function startQuizFromSetup() {
+  closeQuizSetup();
+  const q = State.quiz;
+  let url = `/api/quiz?n=${q.count}`;
+  if (q.level) url += `&level=${q.level}`;
+  await launchQuiz(url, q.level ? `${q.level} 퀴즈` : "랜덤 퀴즈");
+}
+
+async function startLyricsQuiz() {
+  const ids = State.lyrics.foundIds;
+  if (!ids.length) { showToast("먼저 가사를 분석해 주세요"); return; }
+  await launchQuiz(`/api/quiz?n=30&ids=${ids.join(",")}`, "가사 한자 퀴즈");
+}
+
+async function launchQuiz(url, label) {
+  const data = await apiFetch(url);
+  const questions = data.questions || [];
+  if (questions.length === 0) {
+    showToast("문제를 만들 카드가 부족해요");
+    return;
+  }
+  State.quiz.questions = questions;
+  State.quiz.index = 0;
+  State.quiz.correct = 0;
+  State.quiz.answered = false;
+
+  document.getElementById("quiz-badge").textContent = label;
+  document.getElementById("quiz-complete").style.display = "none";
+  document.getElementById("quiz-body").style.display = "flex";
+
+  showView("quiz");
+  showQuizQuestion(0);
+}
+
+const DIRECTION_LABEL = {
+  front2meaning: "뜻을 고르세요",
+  meaning2front: "알맞은 한자/단어를 고르세요",
+  front2reading: "읽는 법을 고르세요",
+};
+
+function showQuizQuestion(index) {
+  const quiz = State.quiz;
+  if (index >= quiz.questions.length) {
+    showQuizComplete();
+    return;
+  }
+  quiz.index = index;
+  quiz.answered = false;
+
+  const q = quiz.questions[index];
+  const total = quiz.questions.length;
+
+  document.getElementById("quiz-progress").style.width = Math.round(index / total * 100) + "%";
+  document.getElementById("quiz-progress-text").textContent = `${index + 1} / ${total}`;
+  document.getElementById("quiz-score").textContent = quiz.correct;
+  document.getElementById("quiz-direction").textContent = DIRECTION_LABEL[q.direction] || "";
+
+  const promptEl = document.getElementById("quiz-prompt");
+  promptEl.textContent = q.prompt;
+  promptEl.classList.toggle("small", q.prompt.length > 6);
+
+  const optsEl = document.getElementById("quiz-options");
+  optsEl.innerHTML = q.options.map((opt, i) =>
+    `<button class="quiz-option" onclick="answerQuiz(this, ${i})">${escapeHtml(opt)}</button>`
+  ).join("");
+}
+
+function answerQuiz(btn, optionIndex) {
+  const quiz = State.quiz;
+  if (quiz.answered) return;
+  quiz.answered = true;
+
+  const q = quiz.questions[quiz.index];
+  const isCorrect = q.options[optionIndex] === q.answer;
+  if (isCorrect) quiz.correct++;
+
+  document.querySelectorAll("#quiz-options .quiz-option").forEach((b, i) => {
+    b.classList.add("disabled");
+    if (q.options[i] === q.answer) b.classList.add("correct");
+  });
+  if (!isCorrect) btn.classList.add("wrong");
+
+  document.getElementById("quiz-score").textContent = quiz.correct;
+
+  setTimeout(() => showQuizQuestion(quiz.index + 1), isCorrect ? 650 : 1300);
+}
+
+function showQuizComplete() {
+  document.getElementById("quiz-body").style.display = "none";
+  document.getElementById("quiz-complete").style.display = "flex";
+  document.getElementById("quiz-progress").style.width = "100%";
+
+  const total = State.quiz.questions.length;
+  const correct = State.quiz.correct;
+  const pct = total ? Math.round(correct / total * 100) : 0;
+
+  document.getElementById("quiz-total").textContent = total;
+  document.getElementById("quiz-correct").textContent = correct;
+  document.getElementById("quiz-accuracy").textContent = pct + "%";
+
+  const subs = pct >= 80
+    ? ["대단해요! 거의 다 맞췄어요 🏆", "실력이 쑥쑥! 🎉"]
+    : pct >= 50
+      ? ["좋아요! 조금만 더 🔥", "절반 이상 정답! 계속 가요 💪"]
+      : ["괜찮아요, 반복이 답이에요 🌱", "틀린 건 내일 또 만나요!"];
+  document.getElementById("quiz-complete-sub").textContent = subs[Math.floor(Math.random() * subs.length)];
+}
+
+function endQuiz() {
+  showView("home");
+  loadHome();
+}
+
+// ══════════════════════════════════════════════════════════
 //  공통 유틸
 // ══════════════════════════════════════════════════════════
 
@@ -639,6 +890,12 @@ async function apiFetch(path, method = "GET", body = null) {
   }
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
 let toastTimer;
 function showToast(msg) {
   const el = document.getElementById("toast");
@@ -646,4 +903,12 @@ function showToast(msg) {
   el.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+}
+
+// 서비스 워커 — 보안 컨텍스트(HTTPS/localhost)에서만 등록됨.
+// 일반 http://IP:8005 접속에서는 자동으로 건너뜀(설치형 홈화면 아이콘은 매니페스트로 동작).
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
 }

@@ -8,6 +8,9 @@
   <meta name="theme-color" content="#0d0f14"/>
   <title>Kanji Flow 2.0</title>
   <meta name="description" content="SM-2 간격 반복 알고리즘 기반 일본어 한자/단어 학습 앱"/>
+  <link rel="manifest" href="/manifest.json"/>
+  <link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+  <meta name="apple-mobile-web-app-title" content="Kanji Flow"/>
   <link rel="stylesheet" href="/css/style.css"/>
 </head>
 <body>
@@ -48,6 +51,18 @@
       </svg>
       지금 바로 학습 시작
     </button>
+
+    <!-- 보조 액션: 랜덤 퀴즈 / 쓰기 연습 -->
+    <div class="home-actions">
+      <button class="action-btn" onclick="openQuizSetup()">
+        <span class="action-emoji">🎯</span>
+        <span>랜덤 퀴즈</span>
+      </button>
+      <button class="action-btn" onclick="openWritingFromHome()">
+        <span class="action-emoji">✍️</span>
+        <span>쓰기 연습</span>
+      </button>
+    </div>
 
     <!-- 연속 학습 -->
     <div class="section">
@@ -123,6 +138,8 @@
           <div class="card-back-kanji" id="card-back-kanji"></div>
           <div class="card-back-meaning" id="card-back-meaning"></div>
           <div class="card-back-reading" id="card-back-reading"></div>
+          <button class="write-inline-btn" id="card-write-btn"
+                  onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
           <div class="card-divider"></div>
           <div class="card-words" id="card-back-words"></div>
         </div>
@@ -178,6 +195,53 @@
       <button class="start-btn" onclick="showView('home'); loadHome();" style="margin:0">
         홈으로 돌아가기
       </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       퀴즈 화면 (사지선다)
+  ══════════════════════════════════════════ -->
+  <div id="quiz-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-word" id="quiz-badge">퀴즈</div>
+      <div class="study-progress-wrap">
+        <div class="study-progress-bar">
+          <div class="study-progress-fill" id="quiz-progress" style="width:0%"></div>
+        </div>
+        <div class="study-progress-text" id="quiz-progress-text">0 / 0</div>
+      </div>
+      <div class="study-close" onclick="endQuiz()">✕</div>
+    </div>
+
+    <div class="quiz-body" id="quiz-body">
+      <div class="quiz-score-pill"><span id="quiz-score">0</span>점</div>
+      <div class="quiz-prompt-wrap">
+        <div class="quiz-direction" id="quiz-direction"></div>
+        <div class="quiz-prompt" id="quiz-prompt">日</div>
+      </div>
+      <div class="quiz-options" id="quiz-options"></div>
+    </div>
+
+    <!-- 퀴즈 완료 -->
+    <div class="study-complete" id="quiz-complete" style="display:none">
+      <div class="complete-emoji">🎯</div>
+      <div class="complete-title">퀴즈 완료!</div>
+      <div class="complete-sub" id="quiz-complete-sub">잘 하셨어요!</div>
+      <div class="complete-stats">
+        <div class="complete-stat">
+          <div class="num" id="quiz-total">0</div>
+          <div class="lbl">문제 수</div>
+        </div>
+        <div class="complete-stat">
+          <div class="num" id="quiz-correct">0</div>
+          <div class="lbl">정답</div>
+        </div>
+        <div class="complete-stat">
+          <div class="num" id="quiz-accuracy">0%</div>
+          <div class="lbl">정확도</div>
+        </div>
+      </div>
+      <button class="start-btn" onclick="endQuiz()" style="margin:0">홈으로 돌아가기</button>
     </div>
   </div>
 
@@ -422,10 +486,79 @@
     </button>
   </nav>
 
+  <!-- ══════════════════════════════════════════
+       한자 쓰기 연습 오버레이
+  ══════════════════════════════════════════ -->
+  <div id="writing-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="writing-meaning">쓰기 연습</div>
+          <div class="overlay-sub" id="writing-reading"></div>
+        </div>
+        <div class="overlay-close" onclick="closeWriting()">✕</div>
+      </div>
+
+      <div class="writing-canvas-wrap" id="writing-canvas"></div>
+
+      <div class="writing-controls">
+        <button class="write-ctrl" id="wc-guide" onclick="toggleWriteGuide()">가이드 끄기</button>
+        <button class="write-ctrl" id="wc-grid" onclick="toggleWriteGrid()">격자 끄기</button>
+        <button class="write-ctrl danger" onclick="clearWriting()">지우기</button>
+      </div>
+
+      <!-- 여러 글자 학습 시 다음/이전 -->
+      <div class="writing-nav" id="writing-nav" style="display:none">
+        <button class="write-nav-btn" onclick="writingPrev()">← 이전</button>
+        <div class="writing-nav-count" id="writing-count">1 / 1</div>
+        <button class="write-nav-btn" onclick="writingNext()">다음 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       퀴즈 설정 모달
+  ══════════════════════════════════════════ -->
+  <div id="quiz-setup-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title">🎯 랜덤 퀴즈</div>
+          <div class="overlay-sub">사지선다로 한자·단어를 맞춰보세요</div>
+        </div>
+        <div class="overlay-close" onclick="closeQuizSetup()">✕</div>
+      </div>
+
+      <div class="quiz-setup-section">
+        <div class="quiz-setup-label">출제 등급</div>
+        <div class="multi-select-chips" id="quiz-level-chips">
+          <button class="select-chip active" data-level="" onclick="pickQuizLevel(this,'')">전체</button>
+          <button class="select-chip" data-level="N5" onclick="pickQuizLevel(this,'N5')">N5</button>
+          <button class="select-chip" data-level="N4" onclick="pickQuizLevel(this,'N4')">N4</button>
+          <button class="select-chip" data-level="N3" onclick="pickQuizLevel(this,'N3')">N3</button>
+          <button class="select-chip" data-level="N2" onclick="pickQuizLevel(this,'N2')">N2</button>
+          <button class="select-chip" data-level="N1" onclick="pickQuizLevel(this,'N1')">N1</button>
+        </div>
+      </div>
+
+      <div class="quiz-setup-section">
+        <div class="quiz-setup-label">문제 수</div>
+        <div class="multi-select-chips" id="quiz-count-chips">
+          <button class="select-chip" data-n="10" onclick="pickQuizCount(this,10)">10문제</button>
+          <button class="select-chip active" data-n="15" onclick="pickQuizCount(this,15)">15문제</button>
+          <button class="select-chip" data-n="30" onclick="pickQuizCount(this,30)">30문제</button>
+        </div>
+      </div>
+
+      <button class="save-btn" style="margin-top:8px" onclick="startQuizFromSetup()">퀴즈 시작</button>
+    </div>
+  </div>
+
   <!-- 토스트 알림 -->
   <div id="toast"></div>
 
 </div>
+<script src="/js/canvas.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

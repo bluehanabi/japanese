@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from database import get_db, init_db, get_setting, set_setting
-from srs import calculate_next_review, QUALITY_MAP, get_card_state
+from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_interval
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -107,6 +107,11 @@ def get_today_cards():
             except:
                 pass
         d["state"] = get_card_state(d["repetitions"], d["interval"])
+        rep, ef, iv = d["repetitions"], d["ease_factor"], d["interval"]
+        d["hints"] = {
+            a: predict_interval(rep, ef, iv, a)
+            for a in ("again", "hard", "good", "easy")
+        }
         return d
 
     review_list = [row_to_dict(r) for r in review_cards]
@@ -150,7 +155,7 @@ def submit_review():
         row["repetitions"], row["ease_factor"], row["interval"], quality
     )
 
-    correct = 1 if quality >= 3 else 0
+    correct = 1 if quality >= 4 else 0
 
     conn.execute("""
         UPDATE reviews
@@ -355,6 +360,90 @@ def search_cards():
         return d
 
     return jsonify({"results": [to_dict(r) for r in rows]})
+
+
+# ══════════════════════════════════════════════════════════
+#  API: 랜덤 사지선다 퀴즈
+# ══════════════════════════════════════════════════════════
+
+@app.route("/api/quiz")
+def build_quiz():
+    """사지선다 퀴즈 문제 묶음 생성.
+
+    쿼리 파라미터:
+      n      : 문제 수 (기본 15)
+      level  : 특정 JLPT 등급만 (예: N5) — 선택
+      type   : 'kanji' | 'word' — 선택
+      ids    : 콤마로 구분된 카드 id (가사 퀴즈 등 특정 카드 한정) — 선택
+    """
+    n = max(1, min(50, int(request.args.get("n", 15))))
+    level = request.args.get("level")
+    ctype = request.args.get("type")
+    ids = request.args.get("ids", "").strip()
+
+    conn = get_db()
+    pool = conn.execute("SELECT id, type, front, back_meaning, back_reading, jlpt_level FROM cards").fetchall()
+    conn.close()
+    pool = [dict(r) for r in pool]
+
+    # 출제 대상 선정
+    if ids:
+        id_set = {int(x) for x in ids.split(",") if x.strip().isdigit()}
+        targets = [c for c in pool if c["id"] in id_set]
+    else:
+        targets = pool
+        if level:
+            targets = [c for c in targets if c["jlpt_level"] == level]
+        if ctype:
+            targets = [c for c in targets if c["type"] == ctype]
+
+    if not targets:
+        return jsonify({"questions": [], "available": 0})
+
+    random.shuffle(targets)
+    chosen = targets[:n]
+
+    # 보기(distractor) 풀
+    meanings = list({c["back_meaning"] for c in pool})
+    fronts = list({c["front"] for c in pool})
+    readings = list({c["back_reading"] for c in pool if c["type"] == "word"})
+
+    def sample_distractors(source, answer, k=3):
+        cand = [x for x in source if x != answer]
+        random.shuffle(cand)
+        return cand[:k]
+
+    questions = []
+    for c in chosen:
+        directions = ["front2meaning", "meaning2front"]
+        if c["type"] == "word" and c["back_reading"]:
+            directions.append("front2reading")
+        direction = random.choice(directions)
+
+        if direction == "front2meaning":
+            prompt, answer, source = c["front"], c["back_meaning"], meanings
+        elif direction == "meaning2front":
+            prompt, answer, source = c["back_meaning"], c["front"], fronts
+        else:
+            prompt, answer, source = c["front"], c["back_reading"], readings
+
+        distractors = sample_distractors(source, answer, 3)
+        if len(distractors) < 3:
+            continue  # 보기 부족하면 건너뜀
+        options = distractors + [answer]
+        random.shuffle(options)
+
+        questions.append({
+            "card_id": c["id"],
+            "type": c["type"],
+            "level": c["jlpt_level"],
+            "direction": direction,
+            "prompt": prompt,
+            "answer": answer,
+            "options": options,
+        })
+
+    return jsonify({"questions": questions, "available": len(targets)})
 
 
 # ══════════════════════════════════════════════════════════
