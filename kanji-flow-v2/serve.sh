@@ -6,7 +6,19 @@ set -e
 cd "$(dirname "$0")"
 
 PORT=8005
-PYTHON="${PYTHON:-python3}"
+
+# python3 찾기 — macOS 비대화식 SSH 세션은 Homebrew 경로가 PATH에 없을 수 있음
+PYTHON="${PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+  for cand in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    if command -v "$cand" >/dev/null 2>&1; then PYTHON="$cand"; break; fi
+  done
+fi
+if [ -z "$PYTHON" ]; then
+  echo "[serve] python3 를 찾을 수 없습니다. 맥에 파이썬을 설치하세요 (예: brew install python)"
+  exit 1
+fi
+echo "[serve] 사용할 파이썬: $PYTHON"
 
 # 가상환경 준비 (최초 1회만 설치)
 if [ ! -d .venv ]; then
