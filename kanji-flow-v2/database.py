@@ -89,9 +89,11 @@ def init_db():
 
     if cur_ver != DATA_VERSION or card_count == 0:
         print(f"[DB] 데이터 버전 변경 감지 ({cur_ver} -> {DATA_VERSION}) — 카드 재생성")
-        cur.execute("DELETE FROM review_log")
-        cur.execute("DELETE FROM reviews")
-        cur.execute("DELETE FROM cards")
+        # 컬럼이 추가됐을 수 있으니 DROP 후 현재 스키마로 재생성 (DELETE 만으론 새 컬럼이 안 생김)
+        cur.execute("DROP TABLE IF EXISTS review_log")
+        cur.execute("DROP TABLE IF EXISTS reviews")
+        cur.execute("DROP TABLE IF EXISTS cards")
+        _create_schema(cur)
         cats = _insert_from_json(conn, cur)
         # 새 데이터에 맞춰 카테고리 설정 재지정 (전체 활성화)
         cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('active_categories', ?)",
