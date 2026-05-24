@@ -139,11 +139,10 @@ async function loadHome() {
       startBtn.onclick = () => startStudy(false);
     }
 
-    // 상태 분포 바
-    const total = stats.total_cards || 1;
-    const nNew = stats.new;
-    const nLearning = stats.learning;
-    const nMastered = stats.mastered;
+    // 상태 분포 바 — 선택한 범위(레벨·급수·종류) 기준
+    const nNew = stats.scope_new ?? stats.new;
+    const nLearning = stats.scope_learning ?? stats.learning;
+    const nMastered = stats.scope_mastered ?? stats.mastered;
 
     document.getElementById("bar-new").style.flex      = nNew;
     document.getElementById("bar-learning").style.flex = nLearning;

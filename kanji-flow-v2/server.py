@@ -33,6 +33,27 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+def _active_scope():
+    """현재 설정(레벨·한자급수·종류·카테고리) 기준 카드 필터 SQL과 파라미터."""
+    study_mode = get_setting("study_mode", "both")
+    levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] \
+             or ["N5", "N4", "N3", "N2", "N1"]
+    kanken = [k.strip() for k in get_setting("active_kanken", "10급,9급,8급,7급").split(",") if k.strip()] \
+             or ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"]
+    categories = [c.strip() for c in get_setting("active_categories", "").split(",") if c.strip()] \
+                 or ["한자", "명사", "동사", "형용사", "부사", "기타", "문법"]
+    type_filter = ""
+    if study_mode == "kanji_only":   type_filter = "AND c.type = 'kanji'"
+    elif study_mode == "word_only":  type_filter = "AND c.type = 'word'"
+    elif study_mode == "grammar_only": type_filter = "AND c.type = 'grammar'"
+    level_cond = (
+        "((c.type = 'kanji' AND c.sub_level IN (%s)) OR (c.type <> 'kanji' AND c.jlpt_level IN (%s)))"
+        % (",".join(["?"] * len(kanken)), ",".join(["?"] * len(levels)))
+    )
+    cond = f"{level_cond} AND c.category IN ({','.join(['?'] * len(categories))}) {type_filter}"
+    return cond, kanken + levels + categories
+
+
 # ══════════════════════════════════════════════════════════
 #  API: 오늘의 학습
 # ══════════════════════════════════════════════════════════
@@ -251,6 +272,14 @@ def get_stats():
         "SELECT COUNT(*) FROM reviews WHERE interval >= 21"
     ).fetchone()[0]
 
+    # 현재 선택한 범위(레벨·급수·종류·카테고리) 기준 집계 — 홈 '학습 현황' 바용
+    scope_cond, scope_params = _active_scope()
+    base = f"FROM cards c JOIN reviews r ON r.card_id = c.id WHERE {scope_cond}"
+    scope_total    = conn.execute(f"SELECT COUNT(*) {base}", scope_params).fetchone()[0]
+    scope_new      = conn.execute(f"SELECT COUNT(*) {base} AND r.repetitions = 0", scope_params).fetchone()[0]
+    scope_learning = conn.execute(f"SELECT COUNT(*) {base} AND r.repetitions > 0 AND r.interval < 21", scope_params).fetchone()[0]
+    scope_mastered = conn.execute(f"SELECT COUNT(*) {base} AND r.interval >= 21", scope_params).fetchone()[0]
+
     due_today = conn.execute(
         "SELECT COUNT(*) FROM reviews WHERE next_review <= ? AND repetitions > 0", (today,)
     ).fetchone()[0]
@@ -293,6 +322,11 @@ def get_stats():
         "new": new_cnt,
         "learning": learning,
         "mastered": mastered,
+        # 선택 범위 기준 (홈 '학습 현황' 바)
+        "scope_total": scope_total,
+        "scope_new": scope_new,
+        "scope_learning": scope_learning,
+        "scope_mastered": scope_mastered,
         "due_today": due_today,
         "today_reviewed": today_done,
         "today_correct": today_correct,
