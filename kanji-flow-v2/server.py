@@ -122,7 +122,8 @@ def get_today_cards():
     #  - 일반 학습: 오늘 복습 예정(next_review <= 오늘)인 카드만
     #  - 추가 학습: 진행 중(학습 중) 카드 전체에서 무작위 (예정일 무관) → '학습중 + @'
     if extra:
-        # 추가 학습: 진행 중(학습 중) 카드 무작위로 설정 개수만큼
+        # 추가 학습: 진행 중(학습 중) 카드 무작위로 설정 개수만큼.
+        # 단, 오늘 '맞았어/완벽히 알아'(quality>=4)로 푼 카드는 제외 → 다른/새 단어 위주로
         review_cards = conn.execute(f"""
             SELECT c.*, r.ease_factor, r.interval, r.repetitions,
                    r.next_review, r.total_reviews, r.correct_count, r.id as review_id
@@ -131,10 +132,11 @@ def get_today_cards():
             WHERE r.repetitions > 0
             AND {level_cond}
             AND c.category IN ({category_placeholders})
+            AND c.id NOT IN (SELECT card_id FROM review_log WHERE reviewed_at = ? AND quality >= 4)
             {type_filter}
             ORDER BY RANDOM()
             LIMIT ?
-        """, level_params + categories + [daily_new]).fetchall()
+        """, level_params + categories + [today, daily_new]).fetchall()
     else:
         review_cards = conn.execute(f"""
             SELECT c.*, r.ease_factor, r.interval, r.repetitions,
@@ -227,20 +229,33 @@ def submit_review():
         conn.close()
         return jsonify({"error": "카드를 찾을 수 없습니다"}), 404
 
-    new_interval, new_ef, new_reps, next_review = calculate_next_review(
-        row["repetitions"], row["ease_factor"], row["interval"], quality
-    )
-
     correct = 1 if quality >= 4 else 0
+    # 오늘 이미 복습한 카드인지 확인 (같은 날 추가 연습이 간격을 부풀리지 않게)
+    already_today = conn.execute(
+        "SELECT 1 FROM review_log WHERE card_id = ? AND reviewed_at = ? LIMIT 1", (card_id, today)
+    ).fetchone()
 
-    conn.execute("""
-        UPDATE reviews
-        SET ease_factor = ?, interval = ?, repetitions = ?,
-            next_review = ?, last_quality = ?,
-            total_reviews = total_reviews + 1,
-            correct_count = correct_count + ?
-        WHERE card_id = ?
-    """, (new_ef, new_interval, new_reps, next_review, quality, correct, card_id))
+    if already_today:
+        # 일정(간격/다음복습)은 그대로 두고, 통계와 이력만 갱신 = '오늘은 오늘치만'
+        conn.execute("""
+            UPDATE reviews SET last_quality = ?, total_reviews = total_reviews + 1,
+                correct_count = correct_count + ? WHERE card_id = ?
+        """, (quality, correct, card_id))
+        new_interval, new_ef, new_reps, next_review = (
+            row["interval"], row["ease_factor"], row["repetitions"], row["next_review"]
+        )
+    else:
+        new_interval, new_ef, new_reps, next_review = calculate_next_review(
+            row["repetitions"], row["ease_factor"], row["interval"], quality
+        )
+        conn.execute("""
+            UPDATE reviews
+            SET ease_factor = ?, interval = ?, repetitions = ?,
+                next_review = ?, last_quality = ?,
+                total_reviews = total_reviews + 1,
+                correct_count = correct_count + ?
+            WHERE card_id = ?
+        """, (new_ef, new_interval, new_reps, next_review, quality, correct, card_id))
 
     conn.execute("""
         INSERT INTO review_log (card_id, reviewed_at, quality)
@@ -255,6 +270,7 @@ def submit_review():
         "interval": new_interval,
         "ease_factor": new_ef,
         "repetitions": new_reps,
+        "rescheduled": not bool(already_today),
         "state": get_card_state(new_reps, new_interval),
     })
 
