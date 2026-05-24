@@ -33,25 +33,31 @@ def index():
     return send_from_directory("static", "index.html")
 
 
-def _active_scope():
-    """현재 설정(레벨·한자급수·종류·카테고리) 기준 카드 필터 SQL과 파라미터."""
-    study_mode = get_setting("study_mode", "both")
+def _level_scope():
+    """레벨 범위만: 한자=漢検 급수, 그 외=JLPT 레벨. (단어장 '전체'용)"""
     levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] \
              or ["N5", "N4", "N3", "N2", "N1"]
     kanken = [k.strip() for k in get_setting("active_kanken", "10급,9급,8급,7급").split(",") if k.strip()] \
              or ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"]
+    cond = (
+        "((c.type = 'kanji' AND c.sub_level IN (%s)) OR (c.type <> 'kanji' AND c.jlpt_level IN (%s)))"
+        % (",".join(["?"] * len(kanken)), ",".join(["?"] * len(levels)))
+    )
+    return cond, kanken + levels
+
+
+def _active_scope():
+    """현재 설정(레벨·한자급수·종류·카테고리) 기준 카드 필터 SQL과 파라미터."""
+    study_mode = get_setting("study_mode", "both")
     categories = [c.strip() for c in get_setting("active_categories", "").split(",") if c.strip()] \
                  or ["한자", "명사", "동사", "형용사", "부사", "기타", "문법"]
     type_filter = ""
     if study_mode == "kanji_only":   type_filter = "AND c.type = 'kanji'"
     elif study_mode == "word_only":  type_filter = "AND c.type = 'word'"
     elif study_mode == "grammar_only": type_filter = "AND c.type = 'grammar'"
-    level_cond = (
-        "((c.type = 'kanji' AND c.sub_level IN (%s)) OR (c.type <> 'kanji' AND c.jlpt_level IN (%s)))"
-        % (",".join(["?"] * len(kanken)), ",".join(["?"] * len(levels)))
-    )
+    level_cond, level_params = _level_scope()
     cond = f"{level_cond} AND c.category IN ({','.join(['?'] * len(categories))}) {type_filter}"
-    return cond, kanken + levels + categories
+    return cond, level_params + categories
 
 
 # ══════════════════════════════════════════════════════════
@@ -382,6 +388,11 @@ def get_all_cards():
     params = []
     where = []
 
+    # 단어장 '전체' = 설정에서 고른 레벨/급수 범위만
+    if request.args.get("scope") == "1":
+        lc, lp = _level_scope()
+        where.append(lc)
+        params.extend(lp)
     if card_type:
         where.append("c.type = ?")
         params.append(card_type)

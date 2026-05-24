@@ -391,6 +391,7 @@ const VOCAB_PER_PAGE = 60;
 
 // 필터 이름 → /api/cards 쿼리 파라미터
 function filterToQuery(filter) {
+  if (filter === "all") return "scope=1";   // 전체 = 선택한 레벨/급수 범위
   if (filter === "kanji" || filter === "word" || filter === "grammar") return `type=${filter}`;
   if (["n5", "n4", "n3", "n2", "n1"].includes(filter)) return `level=${filter.toUpperCase()}`;
   if (filter === "state-new")      return "state=new";

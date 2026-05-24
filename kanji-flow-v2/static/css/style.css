@@ -1605,13 +1605,16 @@ html, body {
 }
 
 /* ── 단어장 필터 칩 상단 고정 + 목록 푸터 ──────────────── */
-.filter-chips {
+/* sticky 는 래퍼(.filter-bar)에 — 칩(.filter-chips)은 overflow-x 라 직접 sticky 하면 세로로 잘림 */
+.filter-bar {
   position: sticky;
   top: 0;
   z-index: 5;
   background: var(--bg-deep);
-  padding-top: 10px;
-  padding-bottom: 10px;
+  padding: 10px 0 6px;
+}
+.filter-bar .filter-chips {
+  margin-top: 0;
 }
 .list-footer {
   text-align: center;
