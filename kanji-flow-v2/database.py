@@ -89,19 +89,46 @@ def init_db():
 
     if cur_ver != DATA_VERSION or card_count == 0:
         print(f"[DB] 데이터 버전 변경 감지 ({cur_ver} -> {DATA_VERSION}) — 카드 재생성")
-        # 컬럼이 추가됐을 수 있으니 DROP 후 현재 스키마로 재생성 (DELETE 만으론 새 컬럼이 안 생김)
-        cur.execute("DROP TABLE IF EXISTS review_log")
+
+        # 1) 기존 학습 진도 백업 (종류+표제어 기준) — 카드 데이터가 바뀌어도 진도 보존
+        progress = {}
+        try:
+            for r in cur.execute("""
+                SELECT c.type AS t, c.front AS f, r.ease_factor, r.interval, r.repetitions,
+                       r.next_review, r.last_quality, r.total_reviews, r.correct_count
+                FROM reviews r JOIN cards c ON c.id = r.card_id
+                WHERE r.total_reviews > 0 OR r.repetitions > 0
+            """):
+                progress[(r["t"], r["f"])] = dict(r)
+        except sqlite3.OperationalError:
+            pass  # 아주 예전 스키마면 백업 생략
+
+        # 2) 카드/복습 테이블만 재생성 (review_log = 히트맵·연속일 기록은 보존)
         cur.execute("DROP TABLE IF EXISTS reviews")
         cur.execute("DROP TABLE IF EXISTS cards")
         _create_schema(cur)
         cats = _insert_from_json(conn, cur)
+
+        # 3) 진도 복원 (여전히 존재하는 카드에 한해)
+        restored = 0
+        for (typ, front), pr in progress.items():
+            row = cur.execute("SELECT id FROM cards WHERE type = ? AND front = ?", (typ, front)).fetchone()
+            if row:
+                cur.execute("""
+                    UPDATE reviews SET ease_factor=?, interval=?, repetitions=?,
+                        next_review=?, last_quality=?, total_reviews=?, correct_count=?
+                    WHERE card_id=?
+                """, (pr["ease_factor"], pr["interval"], pr["repetitions"], pr["next_review"],
+                      pr["last_quality"], pr["total_reviews"], pr["correct_count"], row["id"]))
+                restored += 1
+
         # 새 데이터에 맞춰 카테고리 설정 재지정 (전체 활성화)
         cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('active_categories', ?)",
                     (",".join(cats),))
         cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('data_version', ?)",
                     (DATA_VERSION,))
         conn.commit()
-        print(f"[DB] 카드 {cur.execute('SELECT COUNT(*) FROM cards').fetchone()[0]}개 삽입 완료")
+        print(f"[DB] 카드 {cur.execute('SELECT COUNT(*) FROM cards').fetchone()[0]}개 삽입, 진도 {restored}개 복원")
     else:
         print(f"[DB] 기존 카드 {card_count}개 확인 (버전 {cur_ver})")
 
