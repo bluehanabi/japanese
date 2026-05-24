@@ -28,12 +28,13 @@ if [ ! -d .venv ]; then
   ./.venv/bin/pip install -q -r requirements.txt
 fi
 
-# 기존에 8005 포트를 쓰는 프로세스 정리 (macOS/Linux 공통)
+# 기존 서버 종료 — 포트 점유 프로세스 + 다른 경로에서 뜬 잔여 server.py 둘 다 정리
 if lsof -ti tcp:$PORT >/dev/null 2>&1; then
   echo "[serve] 포트 $PORT 사용 중인 기존 프로세스 종료..."
-  lsof -ti tcp:$PORT | xargs kill 2>/dev/null || true
-  sleep 1
+  lsof -ti tcp:$PORT | xargs kill -9 2>/dev/null || true
 fi
+pkill -f "[s]erver.py" 2>/dev/null || true   # 예전 경로/방식으로 떠 있던 잔여 프로세스 정리
+sleep 1
 
 if [ "$1" = "--bg" ]; then
   echo "[serve] 백그라운드로 시작 (로그: server.log)"

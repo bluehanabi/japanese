@@ -14,6 +14,16 @@ from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_inte
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
+
+@app.after_request
+def no_cache_assets(resp):
+    """HTML/JS/CSS는 캐시하지 않게 해서 배포 후 항상 최신본이 보이도록 함."""
+    if request.path == "/" or request.path.endswith((".html", ".js", ".css")):
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
 # ══════════════════════════════════════════════════════════
 #  정적 파일 서빙
 # ══════════════════════════════════════════════════════════
@@ -70,19 +80,34 @@ def get_today_cards():
     level_placeholders = ",".join(["?"] * len(levels))
     category_placeholders = ",".join(["?"] * len(categories))
 
-    # 복습 카드 (next_review <= 오늘, 이미 한 번 이상 본 것)
-    query_params_review = [today] + levels + categories
-    review_cards = conn.execute(f"""
-        SELECT c.*, r.ease_factor, r.interval, r.repetitions,
-               r.next_review, r.total_reviews, r.correct_count, r.id as review_id
-        FROM cards c
-        JOIN reviews r ON r.card_id = c.id
-        WHERE r.next_review <= ? AND r.repetitions > 0
-        AND c.jlpt_level IN ({level_placeholders})
-        AND c.category IN ({category_placeholders})
-        {type_filter}
-        ORDER BY r.next_review ASC
-    """, query_params_review).fetchall()
+    # 복습 카드
+    #  - 일반 학습: 오늘 복습 예정(next_review <= 오늘)인 카드만
+    #  - 추가 학습: 진행 중(학습 중) 카드 전체에서 무작위 (예정일 무관) → '학습중 + @'
+    if extra:
+        review_cards = conn.execute(f"""
+            SELECT c.*, r.ease_factor, r.interval, r.repetitions,
+                   r.next_review, r.total_reviews, r.correct_count, r.id as review_id
+            FROM cards c
+            JOIN reviews r ON r.card_id = c.id
+            WHERE r.repetitions > 0
+            AND c.jlpt_level IN ({level_placeholders})
+            AND c.category IN ({category_placeholders})
+            {type_filter}
+            ORDER BY RANDOM()
+            LIMIT 30
+        """, levels + categories).fetchall()
+    else:
+        review_cards = conn.execute(f"""
+            SELECT c.*, r.ease_factor, r.interval, r.repetitions,
+                   r.next_review, r.total_reviews, r.correct_count, r.id as review_id
+            FROM cards c
+            JOIN reviews r ON r.card_id = c.id
+            WHERE r.next_review <= ? AND r.repetitions > 0
+            AND c.jlpt_level IN ({level_placeholders})
+            AND c.category IN ({category_placeholders})
+            {type_filter}
+            ORDER BY r.next_review ASC
+        """, [today] + levels + categories).fetchall()
 
     # 신규 카드 (한 번도 안 본 것, 오늘 개수 제한)
     query_params_new = levels + categories + [remaining_new]
@@ -98,22 +123,6 @@ def get_today_cards():
         ORDER BY c.jlpt_level DESC, c.type ASC, c.id ASC
         LIMIT ?
     """, query_params_new).fetchall()
-
-    # 추가 학습인데 복습/신규가 모두 없으면 → 이미 학습한 카드 무작위 복습
-    free_cards = []
-    if extra and not review_cards and not new_cards:
-        free_cards = conn.execute(f"""
-            SELECT c.*, r.ease_factor, r.interval, r.repetitions,
-                   r.next_review, r.total_reviews, r.correct_count, r.id as review_id
-            FROM cards c
-            JOIN reviews r ON r.card_id = c.id
-            WHERE r.repetitions > 0
-            AND c.jlpt_level IN ({level_placeholders})
-            AND c.category IN ({category_placeholders})
-            {type_filter}
-            ORDER BY RANDOM()
-            LIMIT ?
-        """, levels + categories + [20]).fetchall()
 
     conn.close()
 
@@ -132,7 +141,7 @@ def get_today_cards():
         }
         return d
 
-    review_list = [row_to_dict(r) for r in review_cards] + [row_to_dict(r) for r in free_cards]
+    review_list = [row_to_dict(r) for r in review_cards]
     new_list = [row_to_dict(r) for r in new_cards]
 
     # 셔플 활성화 시 복습 카드와 신규 카드를 개별적으로 무작위로 섞음

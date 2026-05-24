@@ -1264,6 +1264,7 @@ html, body {
   gap: 10px;
   margin: 12px 0 4px;
 }
+.home-actions { margin: 12px 20px 4px; }   /* 좌우 20px 들여쓰기로 다른 카드와 정렬 */
 .lyrics-actions { margin: 14px 0; }
 
 .action-btn {
