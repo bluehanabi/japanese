@@ -63,6 +63,27 @@ def _create_schema(cur):
         )
     """)
 
+    # AI 설명 캐시 (실시간 생성분을 저장 = 백데이터, 카드 재생성에도 유지되도록 type:front 키)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_cache (
+            card_key   TEXT PRIMARY KEY,
+            content    TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # 학습 세션 기록 (세션 종료 시 저장 = 백데이터)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS session_log (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            ended_at  TEXT NOT NULL,
+            studied   INTEGER NOT NULL,
+            correct   INTEGER NOT NULL,
+            accuracy  REAL    NOT NULL,
+            summary   TEXT
+        )
+    """)
+
 
 def init_db():
     """스키마 생성 + (데이터 버전이 바뀌었으면) 카드 재생성."""
@@ -78,6 +99,8 @@ def init_db():
         ("active_levels",         "N5,N4"),
         ("active_kanken",         "10급,9급,8급,7급"),   # 학습할 한자 漢検 급수
         ("shuffle_study",         "1"),
+        ("gemini_api_key",        ""),
+        ("gemini_model",          "gemini-3.5-flash"),
     ]
     for key, val in defaults:
         cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, val))

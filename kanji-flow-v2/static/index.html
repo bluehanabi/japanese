@@ -141,6 +141,7 @@
           <div class="card-back-reading" id="card-back-reading"></div>
           <div class="card-back-actions">
             <button class="tts-btn" onclick="event.stopPropagation(); speakCurrentCard()">🔊 발음</button>
+            <button class="ai-btn" onclick="event.stopPropagation(); aiExplainCurrent()">🤖 AI 설명</button>
             <button class="write-inline-btn" id="card-write-btn"
                     onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
           </div>
@@ -196,6 +197,7 @@
           <div class="lbl">정확도</div>
         </div>
       </div>
+      <div class="complete-ai" id="complete-ai" style="display:none"></div>
       <button class="start-btn" onclick="startStudy(true)" style="margin:0 0 10px">
         🔄 더 학습하기
       </button>
@@ -443,6 +445,18 @@
     </div>
 
     <div class="settings-group">
+      <div class="settings-group-title">AI (Gemini)</div>
+      <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:8px;">
+        <div>
+          <div class="settings-item-label">Gemini API 키</div>
+          <div class="settings-item-sub">카드에서 🤖 AI 설명을 쓰려면 키가 필요해요. Google AI Studio에서 무료 발급. (이 기기에만 저장)</div>
+        </div>
+        <input type="password" id="setting-gemini-key" class="ai-key-input"
+               placeholder="AIza..." oninput="onGeminiKey(this.value)" autocomplete="off"/>
+      </div>
+    </div>
+
+    <div class="settings-group">
       <div class="settings-group-title">앱 정보</div>
       <div class="settings-item">
         <div>
@@ -564,6 +578,22 @@
       </div>
 
       <button class="save-btn" style="margin-top:8px" onclick="startQuizFromSetup()">퀴즈 시작</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       AI 설명 오버레이
+  ══════════════════════════════════════════ -->
+  <div id="ai-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="ai-title">🤖 AI 설명</div>
+          <div class="overlay-sub" id="ai-sub"></div>
+        </div>
+        <div class="overlay-close" onclick="closeAI()">✕</div>
+      </div>
+      <div class="ai-body" id="ai-body"></div>
     </div>
   </div>
 

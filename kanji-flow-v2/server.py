@@ -613,6 +613,114 @@ def get_categories():
     return jsonify({"categories": cats})
 
 
+# ══════════════════════════════════════════════════════════
+#  API: AI (Gemini) — 설명·예문
+# ══════════════════════════════════════════════════════════
+
+def _gemini_generate(prompt, api_key, model):
+    """Gemini REST API 호출 (표준 라이브러리만 사용)."""
+    import urllib.request
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{model}:generateContent?key={api_key}")
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=40) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+_NO_MD = "\n\n마크다운 기호(*, #, -, ` 등) 쓰지 말고 일반 문장과 줄바꿈으로만 써줘. 너무 길지 않게."
+
+def _build_explain_prompt(c):
+    t = c["type"]
+    if t == "kanji":
+        body = (f"일본어 한자 '{c['front']}' (뜻: {c['back_meaning']}, 읽기: {c['back_reading']})를 "
+                f"한국인 일본어 학습자에게 설명해줘.\n"
+                f"1) 핵심 의미와 뉘앙스\n2) 외우기 쉬운 연상법(스토리)\n"
+                f"3) 자주 쓰는 단어/예문 2개 (일본어 + 후리가나 + 한국어 뜻)")
+    elif t == "grammar":
+        body = (f"일본어 문법 '{c['front']}' (뜻: {c['back_meaning']})를 한국인 학습자에게 설명해줘.\n"
+                f"1) 의미와 쓰임\n2) 접속(연결) 형태\n3) 예문 2개 (일본어 + 후리가나 + 한국어 뜻)\n"
+                f"4) 비슷한 표현과의 차이(있으면)")
+    else:
+        body = (f"일본어 단어 '{c['front']}' (읽기: {c['back_reading']}, 뜻: {c['back_meaning']})를 "
+                f"한국인 학습자에게 설명해줘.\n1) 뉘앙스와 쓰임\n2) 외우기 쉬운 연상법\n"
+                f"3) 예문 2개 (일본어 + 후리가나 + 한국어 뜻)")
+    return body + _NO_MD
+
+
+@app.route("/api/ai/explain", methods=["POST"])
+def ai_explain():
+    """실시간 AI 설명 — 캐시에 있으면 그대로(백데이터), 없으면 생성 후 저장."""
+    card_id = (request.get_json() or {}).get("card_id")
+    force = (request.get_json() or {}).get("force")   # 다시 생성
+    conn = get_db()
+    row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "카드를 찾을 수 없어요."}), 404
+    row = dict(row)
+    card_key = f"{row['type']}:{row['front']}"
+
+    if not force:
+        cached = conn.execute("SELECT content FROM ai_cache WHERE card_key = ?", (card_key,)).fetchone()
+        if cached:
+            conn.close()
+            return jsonify({"text": cached["content"], "cached": True})
+
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        conn.close()
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+    try:
+        text = _gemini_generate(_build_explain_prompt(row), api_key, model)
+        conn.execute("INSERT OR REPLACE INTO ai_cache (card_key, content, created_at) VALUES (?, ?, ?)",
+                     (card_key, text, date.today().isoformat()))
+        conn.commit()
+        conn.close()
+        return jsonify({"text": text, "cached": False})
+    except Exception as e:
+        conn.close()
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            detail = e.read().decode("utf-8", "ignore")[:300]
+            return jsonify({"error": f"Gemini 오류 {e.code}: {detail}"}), 502
+        return jsonify({"error": f"AI 호출 실패: {e}"}), 502
+
+
+@app.route("/api/ai/session_summary", methods=["POST"])
+def ai_session_summary():
+    """학습 세션 종료 시 — AI 요약/조언을 만들고 session_log에 저장 (백데이터)."""
+    data = request.get_json() or {}
+    studied = int(data.get("studied", 0))
+    correct = int(data.get("correct", 0))
+    hard = data.get("hard_fronts", [])[:15]   # 어려웠던(몰랐음/힘들었어) 카드들
+    accuracy = round(correct / max(studied, 1) * 100, 1)
+
+    summary = ""
+    api_key = get_setting("gemini_api_key", "")
+    if api_key and studied > 0:
+        model = get_setting("gemini_model", "gemini-3.5-flash")
+        hard_str = ", ".join(hard) if hard else "없음"
+        prompt = (f"나는 일본어를 공부하는 한국인이야. 방금 학습 세션을 끝냈어.\n"
+                  f"- 학습한 카드 수: {studied}개\n- 정답 수: {correct}개 (정답률 {accuracy}%)\n"
+                  f"- 어려워한 항목: {hard_str}\n"
+                  f"이 결과를 보고 따뜻하게 격려하고, 어려워한 항목 위주로 내일 어떻게 복습하면 좋을지 "
+                  f"구체적인 팁을 2~3문장으로 한국어로 짧게 말해줘. 마크다운 기호 없이.")
+        try:
+            summary = _gemini_generate(prompt, api_key, model)
+        except Exception as e:
+            summary = ""   # 요약 실패해도 세션 기록은 저장
+
+    conn = get_db()
+    conn.execute("INSERT INTO session_log (ended_at, studied, correct, accuracy, summary) VALUES (?, ?, ?, ?, ?)",
+                 (date.today().isoformat(), studied, correct, accuracy, summary))
+    conn.commit()
+    conn.close()
+    return jsonify({"summary": summary, "accuracy": accuracy})
+
+
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     conn = get_db()

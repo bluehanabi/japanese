@@ -17,6 +17,7 @@ const State = {
     flipped: false,     // 카드 뒤집기 여부
     sessionCorrect: 0,  // 세션 정답 수
     sessionTotal: 0,    // 세션 총 카드 수
+    hardFronts: [],     // 이번 세션에서 어려워한(몰랐음/힘들었어) 카드
   },
   vocab: {
     filter: "all",
@@ -52,6 +53,7 @@ const State = {
     active_levels: "N5,N4",
     active_kanken: "10급,9급,8급,7급",
     active_categories: "한자,명사,동사,형용사,부사,기타,문법",
+    gemini_api_key: "",
   },
 };
 
@@ -188,6 +190,7 @@ async function startStudy(extra = false) {
   State.study.index = 0;
   State.study.sessionCorrect = 0;
   State.study.sessionTotal = 0;
+  State.study.hardFronts = [];
 
   showCard(0);
 }
@@ -317,6 +320,7 @@ async function submitRating(answer) {
   const card = State.study.queue[State.study.index];
   State.study.sessionTotal++;
   if (answer === "good" || answer === "easy") State.study.sessionCorrect++;
+  else State.study.hardFronts.push(card.front);   // 몰랐음/힘들었어 → 약점 기록
 
   // API 호출
   apiFetch("/api/review", "POST", { card_id: card.id, answer });
@@ -348,6 +352,31 @@ function showStudyComplete() {
   document.getElementById("complete-sub").textContent = subs[Math.floor(Math.random() * subs.length)];
 
   loadHome();
+  saveSessionDigest(total, correct);   // 세션 종료 → 백데이터 저장 + AI 요약
+}
+
+// 세션 종료 시: 기록 저장 + AI 요약 (백데이터)
+async function saveSessionDigest(total, correct) {
+  const aiEl = document.getElementById("complete-ai");
+  aiEl.style.display = "none";
+  if (total === 0) return;
+
+  const hasKey = !!(State.settings.gemini_api_key || "").trim();
+  if (hasKey) {
+    aiEl.style.display = "block";
+    aiEl.innerHTML = '<div class="spinner"></div>';
+  }
+  const data = await apiFetch("/api/ai/session_summary", "POST", {
+    studied: total, correct: correct,
+    hard_fronts: State.study.hardFronts,
+  });
+  if (data.summary) {
+    aiEl.style.display = "block";
+    aiEl.innerHTML = `<div class="complete-ai-title">🤖 오늘의 AI 코치</div>
+      <div class="complete-ai-text">${escapeHtml(data.summary).replace(/\n/g, "<br>")}</div>`;
+  } else {
+    aiEl.style.display = "none";   // 키 없거나 실패 시 조용히 숨김
+  }
 }
 
 function endStudy() {
@@ -632,6 +661,10 @@ async function loadSettingsUI() {
 
   // 漢検 급수 칩 — 선택된 JLPT 등급에 해당하는 급수만 표시
   renderKankenChips(false);
+
+  // Gemini API 키 복원
+  const keyInput = document.getElementById("setting-gemini-key");
+  if (keyInput) keyInput.value = s.gemini_api_key || "";
 
   // 총 카드
   document.getElementById("info-total-cards").textContent =
@@ -1063,6 +1096,37 @@ function cardTTSText(card) {
 
 function speakCurrentCard() {
   speak(cardTTSText(State.study.queue[State.study.index]));
+}
+
+// ── AI 설명 (Gemini) ───────────────────────────────────
+function onGeminiKey(value) {
+  State.settings.gemini_api_key = value.trim();
+}
+
+async function aiExplainCurrent() {
+  const card = State.study.queue[State.study.index];
+  if (!card) return;
+  aiExplain(card.id, card.front);
+}
+
+async function aiExplain(cardId, label) {
+  const overlay = document.getElementById("ai-overlay");
+  const body = document.getElementById("ai-body");
+  document.getElementById("ai-sub").textContent = label || "";
+  body.innerHTML = '<div class="spinner"></div>';
+  overlay.classList.add("open");
+
+  const data = await apiFetch("/api/ai/explain", "POST", { card_id: cardId });
+  if (data.error) {
+    body.innerHTML = `<div class="ai-error">${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  // 줄바꿈 보존해서 표시
+  body.innerHTML = `<div class="ai-text">${escapeHtml(data.text || "").replace(/\n/g, "<br>")}</div>`;
+}
+
+function closeAI() {
+  document.getElementById("ai-overlay").classList.remove("open");
 }
 
 function escapeHtml(s) {
