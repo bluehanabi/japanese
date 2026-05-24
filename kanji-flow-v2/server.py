@@ -3,6 +3,7 @@ Kanji Flow 2.0 - Flask 백엔드 서버
 포트 8005로 실행
 """
 import json
+import os
 import re
 import random
 from datetime import date, timedelta
@@ -31,6 +32,22 @@ def no_cache_assets(resp):
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
+
+
+@app.route("/download")
+def download_apk():
+    """안드로이드 APK 다운로드 (GitHub Actions가 빌드해 둔 파일)."""
+    apk_dir = os.path.join(os.path.dirname(__file__), "static", "download")
+    apk = os.path.join(apk_dir, "kanji-flow.apk")
+    if os.path.exists(apk):
+        return send_from_directory(apk_dir, "kanji-flow.apk", as_attachment=True,
+                                   download_name="KanjiFlow.apk",
+                                   mimetype="application/vnd.android.package-archive")
+    return Response(
+        "<div style='font-family:sans-serif;padding:40px;text-align:center;color:#333'>"
+        "<h2>APK가 아직 준비되지 않았어요</h2>"
+        "<p>GitHub Actions에서 'Build APK' 워크플로를 실행하면 생성됩니다.</p></div>",
+        mimetype="text/html", status=404)
 
 
 def _level_scope():

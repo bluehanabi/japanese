@@ -18,7 +18,14 @@ kanji-app/app/build/
 kanji-app/.gradle/
 kanji-app/.kotlin/
 kanji-app/local.properties
+android/build/
+android/app/build/
+android/.gradle/
+android/.kotlin/
+android/local.properties
 *.apk
+# 단, 배포용으로 게시된 APK 는 추적 (CI 가 생성)
+!kanji-flow-v2/static/download/kanji-flow.apk
 
 # OS / 에디터
 .DS_Store
