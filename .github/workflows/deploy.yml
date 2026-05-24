@@ -4,9 +4,6 @@ name: Deploy to Mac server
 on:
   push:
     branches: [claude/pensive-ramanujan-n57KJ]
-    paths:
-      - "kanji-flow-v2/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 jobs:
