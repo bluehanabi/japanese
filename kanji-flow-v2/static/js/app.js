@@ -800,7 +800,14 @@ function startLesson(cards, unitIdx) {
   steps.push({ type: "quiz", dir: "f2m" });
   if (words.filter(c => c.type === "word").length >= 4) steps.push({ type: "listen" });
   steps.push({ type: "quiz", dir: "m2f" });
+  const hasKey = !!(State.settings.gemini_api_key || "").trim();
+  if (hasKey) steps.push({ type: "sentence" });   // 마지막: 배운 단어로 문장 맞추기
   State.lesson = { cards, words, steps, idx: 0, unitIdx, wrong: new Set(), mode: "path" };
+  if (hasKey) {
+    // 레슨 푸는 동안 백그라운드로 미리 생성 (문장 스텝에서 즉시 출제)
+    const sw = cards.filter(c => c.type === "word").map(c => c.front);
+    State.lesson._sentP = fetchLessonSentences(sw.length ? sw : words.map(w => w.front));
+  }
   showView("lesson");
   runLessonStep();
 }
@@ -816,6 +823,7 @@ function runLessonStep() {
   if (step.type === "match") return renderMatch(body, L.words, () => lessonNext());
   if (step.type === "quiz") return lessonQuiz(body, step.dir);
   if (step.type === "listen") return lessonListen(body);
+  if (step.type === "sentence") return lessonSentence(body);
 }
 function lessonNext() { State.lesson.idx++; runLessonStep(); }
 function lessonIntro(body) {
@@ -895,6 +903,71 @@ function lessonListen(body) {
     });
   }
   showQ();
+}
+// 유닛 단어로 문장 생성 시도 → 실패하면 일반 캐시 → 둘 다 없으면 빈 배열(스텝 스킵)
+async function fetchLessonSentences(words) {
+  const d = await apiFetch("/api/ai/sentences", "POST", { words });
+  let items = (d.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  if (!items.length) {
+    const g = await apiFetch("/api/ai/sentences", "POST", {});
+    items = (g.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  }
+  return items.slice(0, 3);
+}
+// 문장 맞추기 스텝 (타일 배열, 방향 랜덤 한↔일)
+function lessonSentence(body) {
+  const L = State.lesson;
+  body.innerHTML = `<div style="text-align:center;color:var(--text-secondary);padding:48px 0">
+    <div class="spinner"></div><div style="margin-top:12px">문장 준비 중…</div></div>`;
+  Promise.resolve(L._sentP).then(items => {
+    items = (items || []).filter(s => s.jp_tiles && s.kr_tiles).slice(0, 3);
+    if (!items.length) { lessonNext(); return; }   // 못 만들면 조용히 스킵
+    let qi = 0;
+    function showS() {
+      if (qi >= items.length) { lessonNext(); return; }
+      const it = items[qi];
+      const dir = Math.random() < 0.5 ? "jp2kr" : "kr2jp";
+      const prompt = dir === "jp2kr" ? it.jp : it.kr;
+      const hint = dir === "jp2kr" ? "일본어를 보고 한국어를 순서대로" : "한국어를 보고 일본어를 순서대로";
+      const target = (dir === "jp2kr" ? it.kr_tiles : it.jp_tiles).slice();
+      let answer = [], bank = shuffleArr(target.slice()), done = false;
+      function draw() {
+        body.innerHTML = `
+          <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 8px">${hint}</div>
+          <div class="lesson-prompt" style="font-size:18px;margin:6px 0 14px">${escapeHtml(prompt)}</div>
+          <div class="sent-answer">${answer.map((t, i) => `<button class="tile" data-a="${i}">${escapeHtml(t)}</button>`).join("") || '<span class="sent-placeholder">아래에서 순서대로 누르세요</span>'}</div>
+          <div class="sent-bank">${bank.map((t, i) => t === null ? "" : `<button class="tile" data-b="${i}">${escapeHtml(t)}</button>`).join("")}</div>
+          <div class="sent-result" id="ls-res" style="display:none"></div>
+          <button class="quiz-next-btn" id="ls-check">확인</button>`;
+        body.querySelectorAll("[data-b]").forEach(b => b.onclick = () => {
+          if (done) return; const i = +b.dataset.b; if (bank[i] === null) return;
+          answer.push(bank[i]); bank[i] = null; draw();
+        });
+        body.querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
+          if (done) return; const i = +b.dataset.a; const t = answer.splice(i, 1)[0];
+          const e = bank.indexOf(null); if (e >= 0) bank[e] = t; else bank.push(t); draw();
+        });
+        document.getElementById("ls-check").onclick = check;
+      }
+      function check() {
+        if (done) { qi++; showS(); return; }
+        done = true;
+        const ok = answer.join("") === target.join("");
+        const res = document.getElementById("ls-res");
+        res.style.display = "block"; res.className = "sent-result " + (ok ? "ok" : "ng");
+        res.innerHTML = `<div class="sent-result-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+          <div class="sent-result-jp">${escapeHtml(it.jp)}</div>
+          <div class="sent-result-kr">${escapeHtml(it.kr)}</div>`;
+        speak(it.jp);
+        body.querySelectorAll(".tile").forEach(b => b.classList.add("disabled"));
+        const btn = document.getElementById("ls-check");
+        btn.textContent = (qi >= items.length - 1) ? "완료 →" : "다음 문장 →";
+        btn.onclick = check;
+      }
+      draw();
+    }
+    showS();
+  });
 }
 function finishLesson() {
   const L = State.lesson;
