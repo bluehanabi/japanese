@@ -271,7 +271,7 @@ function showView(name) {
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (["study", "quiz", "sentence", "ai-chat", "conj", "listen"].includes(name)) ? "none" : "flex";
+    (["study", "quiz", "sentence", "ai-chat", "conj", "listen", "lesson"].includes(name)) ? "none" : "flex";
 }
 
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
@@ -784,18 +784,183 @@ async function loadPath() {
 async function startPathUnit(idx) {
   await loadPathData();
   const refs = PATH_UNITS[idx];
-  if (!refs) return;
+  if (!refs) { showToast("마지막 유닛까지 끝냈어요 🎉"); showView("path"); loadPath(); return; }
   showToast("불러오는 중…");
   const data = await apiFetch("/api/unit_cards", "POST", { refs });
   const cards = data.cards || [];
   if (!cards.length) { showToast("카드를 불러오지 못했어요"); return; }
-  showView("study");
-  document.getElementById("study-complete").style.display = "none";
-  Object.assign(State.study, {
-    queue: cards, unified: true, extra: false, index: 0,
-    sessionCorrect: 0, sessionTotal: 0, hardFronts: [], returnTo: "path", unitIdx: idx,
+  startLesson(cards, idx);
+}
+
+// ── 멀티스텝 유닛 레슨 ───────────────────────────────────
+function startLesson(cards, unitIdx) {
+  const words = cards.filter(c => c.back_meaning && c.front);
+  const steps = [{ type: "intro" }];
+  if (words.length >= 4) steps.push({ type: "match" });
+  steps.push({ type: "quiz", dir: "f2m" });
+  if (words.filter(c => c.type === "word").length >= 4) steps.push({ type: "listen" });
+  steps.push({ type: "quiz", dir: "m2f" });
+  State.lesson = { cards, words, steps, idx: 0, unitIdx, wrong: new Set(), mode: "path" };
+  showView("lesson");
+  runLessonStep();
+}
+function lessonExit() {
+  if (State.lesson && State.lesson.mode === "match") { showView("ai"); return; }
+  showView("path"); loadPath();
+}
+function runLessonStep() {
+  const L = State.lesson, step = L.steps[L.idx], body = document.getElementById("lesson-body");
+  document.getElementById("lesson-step").textContent = `${Math.min(L.idx + 1, L.steps.length)} / ${L.steps.length}`;
+  if (!step) { finishLesson(); return; }
+  if (step.type === "intro") return lessonIntro(body);
+  if (step.type === "match") return renderMatch(body, L.words, () => lessonNext());
+  if (step.type === "quiz") return lessonQuiz(body, step.dir);
+  if (step.type === "listen") return lessonListen(body);
+}
+function lessonNext() { State.lesson.idx++; runLessonStep(); }
+function lessonIntro(body) {
+  const L = State.lesson;
+  body.innerHTML = `
+    <div class="lesson-prompt" style="font-size:16px;margin-bottom:8px">새로 배울 ${L.cards.length}개</div>
+    <div class="lesson-intro">${L.cards.map((c, i) => `
+      <div class="li-row" onclick="speak(cardTTSText(State.lesson.cards[${i}]))">
+        <div class="li-front">${escapeHtml(c.front)}</div>
+        <div class="li-info"><div>${escapeHtml(c.back_meaning || "")}</div>
+          <div class="li-read">${escapeHtml(c.back_reading || "")}</div></div>
+        <div>🔊</div></div>`).join("")}</div>
+    <button class="start-btn" style="margin-top:14px" onclick="lessonNext()">시작하기 →</button>`;
+}
+function lessonQuiz(body, dir) {
+  const L = State.lesson, items = L.words.slice();
+  let qi = 0;
+  function showQ() {
+    if (qi >= items.length) { lessonNext(); return; }
+    const c = items[qi];
+    const prompt = dir === "f2m" ? c.front : c.back_meaning;
+    const sub = dir === "f2m" ? (c.back_reading || "") : "";
+    const answer = dir === "f2m" ? c.back_meaning : c.front;
+    const pool = (dir === "f2m" ? L.words.map(x => x.back_meaning) : L.words.map(x => x.front)).filter(Boolean);
+    const opts = shuffleArr([answer, ...shuffleArr(pool.filter(x => x !== answer)).slice(0, 3)]);
+    body.innerHTML = `
+      <div class="lesson-prompt">${escapeHtml(prompt)}<div class="li-read">${escapeHtml(sub)}</div></div>
+      <div class="quiz-options">${opts.map((o, i) => `<button class="quiz-option" data-i="${i}">${escapeHtml(o)}</button>`).join("")}</div>
+      <div class="quiz-reveal" id="lq-rev" style="display:none"></div>`;
+    body.querySelectorAll(".quiz-option").forEach((b, i) => {
+      b.onclick = () => {
+        const ok = opts[i] === answer;
+        if (!ok) L.wrong.add(c.front);
+        body.querySelectorAll(".quiz-option").forEach((bb, j) => {
+          bb.classList.add("disabled");
+          if (opts[j] === answer) bb.classList.add("correct");
+          else if (j === i) bb.classList.add("wrong");
+        });
+        if (dir === "f2m") speak(cardTTSText(c));
+        const rev = document.getElementById("lq-rev");
+        rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
+        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div>
+          <div class="reveal-front">${escapeHtml(c.front)}</div>
+          <div class="reveal-meaning">${escapeHtml((c.back_reading || "") + " " + (c.back_meaning || ""))}</div>
+          <button class="quiz-next-btn" id="lq-next">다음 →</button>`;
+        document.getElementById("lq-next").onclick = () => { qi++; showQ(); };
+      };
+    });
+  }
+  showQ();
+}
+function lessonListen(body) {
+  const L = State.lesson, items = L.words.filter(c => c.type === "word");
+  let qi = 0;
+  function showQ() {
+    if (qi >= items.length) { lessonNext(); return; }
+    const c = items[qi];
+    const answer = c.back_meaning;
+    const opts = shuffleArr([answer, ...shuffleArr(L.words.map(x => x.back_meaning).filter(x => x && x !== answer)).slice(0, 3)]);
+    body.innerHTML = `
+      <div style="text-align:center;margin:24px 0 16px">
+        <button class="tts-btn" style="font-size:17px;padding:14px 22px" onclick="speak(cardTTSText(State.lesson._cur))">🔊 듣기</button>
+        <button class="tts-btn" style="margin-left:8px" onclick="speakRate(cardTTSText(State.lesson._cur),0.6)">🐢</button>
+      </div>
+      <div class="quiz-options">${opts.map((o, i) => `<button class="quiz-option" data-i="${i}">${escapeHtml(o)}</button>`).join("")}</div>
+      <div class="quiz-reveal" id="ll-rev" style="display:none"></div>`;
+    L.lesson_cur = c; State.lesson._cur = c;
+    speak(cardTTSText(c));
+    body.querySelectorAll(".quiz-option").forEach((b, i) => {
+      b.onclick = () => {
+        const ok = opts[i] === answer; if (!ok) L.wrong.add(c.front);
+        body.querySelectorAll(".quiz-option").forEach((bb, j) => { bb.classList.add("disabled"); if (opts[j] === answer) bb.classList.add("correct"); else if (j === i) bb.classList.add("wrong"); });
+        const rev = document.getElementById("ll-rev"); rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
+        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div><div class="reveal-front">${escapeHtml(c.front)}</div><div class="reveal-meaning">${escapeHtml((c.back_reading || "") + " " + (c.back_meaning || ""))}</div><button class="quiz-next-btn" id="ll-next">다음 →</button>`;
+        document.getElementById("ll-next").onclick = () => { qi++; showQ(); };
+      };
+    });
+  }
+  showQ();
+}
+function finishLesson() {
+  const L = State.lesson;
+  L.cards.forEach(c => apiFetch("/api/review", "POST", { card_id: c.id, answer: L.wrong.has(c.front) ? "hard" : "good" }));
+  const body = document.getElementById("lesson-body");
+  document.getElementById("lesson-step").textContent = "완료";
+  body.innerHTML = `<div style="text-align:center;padding:36px 0">
+    <div style="font-size:60px">🎉</div>
+    <div class="complete-title">유닛 완료!</div>
+    <div class="complete-sub">${L.wrong.size === 0 ? "한 번도 안 틀렸어요! 🔥" : `틀린 단어 ${L.wrong.size}개는 곧 복습으로 나와요`}</div>
+    <button class="start-btn" style="margin:20px 0 10px" onclick="startPathUnit(${L.unitIdx + 1})">▶ 다음 유닛</button>
+    <button class="start-btn ghost" onclick="lessonExit()">🗺️ 경로로</button></div>`;
+}
+
+// ── 짝 맞추기 (한국어 ↔ 일본어 매칭) ─────────────────────
+function renderMatch(container, cards, onDone) {
+  const items = cards.filter(c => c.back_meaning && c.front).slice(0, 5);
+  if (items.length < 2) { onDone(0); return; }
+  let left = shuffleArr(items.map((c, i) => ({ i, t: c.back_meaning })));
+  let right = shuffleArr(items.map((c, i) => ({ i, t: c.front + (c.back_reading ? `（${c.back_reading}）` : "") })));
+  let selL = null, selR = null, matched = new Set(), mistakes = 0;
+  function draw() {
+    container.innerHTML = `<div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 12px">짝을 맞춰보세요</div>
+      <div class="match-wrap">
+        <div class="match-col">${left.map((x, li) => `<button class="match-cell ${matched.has(x.i) ? "matched" : ""} ${selL === li ? "sel" : ""}" data-l="${li}">${escapeHtml(x.t)}</button>`).join("")}</div>
+        <div class="match-col">${right.map((x, ri) => `<button class="match-cell ${matched.has(x.i) ? "matched" : ""} ${selR === ri ? "sel" : ""}" data-r="${ri}">${escapeHtml(x.t)}</button>`).join("")}</div>
+      </div>`;
+    container.querySelectorAll(".match-cell").forEach(b => {
+      b.onclick = () => {
+        if (b.dataset.l !== undefined) { if (matched.has(left[+b.dataset.l].i)) return; selL = +b.dataset.l; }
+        else { if (matched.has(right[+b.dataset.r].i)) return; selR = +b.dataset.r; }
+        if (selL !== null && selR !== null) {
+          if (left[selL].i === right[selR].i) {
+            matched.add(left[selL].i);
+            const c = cards[left[selL].i]; if (c) speak(cardTTSText(c));
+            selL = selR = null; draw();
+            if (matched.size === items.length) setTimeout(() => onDone(mistakes), 450);
+            return;
+          } else {
+            mistakes++; selL = selR = null; draw();
+            return;
+          }
+        }
+        draw();
+      };
+    });
+  }
+  draw();
+}
+async function startMatchGame() {
+  const data = await apiFetch("/api/today");
+  let pool = [...(data.review_cards || []), ...(data.new_cards || [])].filter(c => c.back_meaning && c.front);
+  if (pool.length < 4) { const v = await apiFetch("/api/cards?per_page=40&scope=1"); pool = (v.cards || []).filter(c => c.back_meaning && c.front); }
+  if (pool.length < 4) { showToast("카드가 부족해요"); return; }
+  State.lesson = { mode: "match" };
+  State.match = { pool };
+  showView("lesson");
+  document.getElementById("lesson-step").textContent = "🔗 짝 맞추기";
+  matchRound();
+}
+function matchRound() {
+  const set = shuffleArr(State.match.pool).slice(0, 5);
+  renderMatch(document.getElementById("lesson-body"), set, m => {
+    showToast(m === 0 ? "완벽! 🔥" : "좋아요!");
+    setTimeout(matchRound, 700);
   });
-  showUnifiedStep(0);
 }
 
 // 홈 '학습 현황' 탭 → 단어장에서 여태 학습한 카드만 보여준다

@@ -1572,6 +1572,89 @@ html, body {
 }
 .quiz-next-btn:active { transform: scale(0.98); }
 
+/* ── 멀티스텝 레슨 ──────────────────────────────────── */
+.lesson-prompt {
+  text-align: center;
+  font-size: 30px;
+  font-weight: 700;
+  margin: 24px 0 18px;
+  line-height: 1.3;
+  word-break: keep-all;
+}
+.lesson-prompt .li-read {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+.lesson-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.li-row:active { transform: scale(0.99); }
+.li-front {
+  font-size: 22px;
+  font-weight: 600;
+  min-width: 84px;
+  word-break: keep-all;
+}
+.li-info { flex: 1; }
+.li-info > div:first-child { font-size: 15px; }
+.li-read { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+/* ── 짝 맞추기 (매칭) ───────────────────────────────── */
+.match-wrap {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+.match-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.match-cell {
+  padding: 16px 12px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-kr);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  word-break: keep-all;
+  line-height: 1.3;
+  min-height: 56px;
+  transition: background 0.12s, border-color 0.12s, opacity 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.match-cell:active { transform: scale(0.98); }
+.match-cell.sel {
+  border-color: var(--indigo);
+  background: var(--indigo-glow);
+  box-shadow: 0 0 0 2px var(--indigo-glow);
+}
+.match-cell.matched {
+  opacity: 0.25;
+  pointer-events: none;
+  border-style: dashed;
+}
+
 /* ── 문법(grammar) 카드 스타일 ──────────────────────── */
 .badge-grammar { background: rgba(34,197,94,0.18); color: #4ade80; }
 

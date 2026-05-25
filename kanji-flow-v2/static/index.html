@@ -475,6 +475,18 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       유닛 레슨 (멀티스텝) / 짝 맞추기
+  ══════════════════════════════════════════ -->
+  <div id="lesson-view" class="view">
+    <div class="study-header">
+      <div class="study-close" onclick="lessonExit()">✕</div>
+      <div style="flex:1;text-align:center;font-size:13px;color:var(--text-secondary)" id="lesson-step"></div>
+      <div style="width:24px"></div>
+    </div>
+    <div id="lesson-body" style="padding:8px 20px 48px"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        활용 연습 (동사·형용사 활용)
   ══════════════════════════════════════════ -->
   <div id="conj-view" class="view">
@@ -740,6 +752,10 @@
       <button class="ai-card" onclick="startListening()">
         <div class="ai-card-emoji">🎧</div>
         <div><div class="ai-card-t">듣기 연습</div><div class="ai-card-s">문장 듣고 받아쓰기 (느리게·반복)</div></div>
+      </button>
+      <button class="ai-card" onclick="startMatchGame()">
+        <div class="ai-card-emoji">🔗</div>
+        <div><div class="ai-card-t">짝 맞추기</div><div class="ai-card-s">한국어 ↔ 일본어 빠르게 매칭</div></div>
       </button>
     </div>
   </div>
