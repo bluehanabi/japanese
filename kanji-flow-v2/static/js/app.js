@@ -74,6 +74,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setGreeting();
   document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
   loadReadingFreq();
+  loadConjugation();
   flushReviewOutbox();                                  // 오프라인 중 쌓인 평가 동기화
   window.addEventListener("online", flushReviewOutbox); // 연결 복구 시 재동기화
   await loadHome();
@@ -268,7 +269,7 @@ function showView(name) {
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (name === "study" || name === "quiz" || name === "sentence" || name === "ai-chat") ? "none" : "flex";
+    (["study", "quiz", "sentence", "ai-chat", "conj", "listen"].includes(name)) ? "none" : "flex";
 }
 
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
@@ -1682,6 +1683,154 @@ function endSentence() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  활용 연습 (동사·형용사 활용 — 규칙 기반, AI 불필요)
+// ══════════════════════════════════════════════════════════
+var CONJ = { verbs: [], adjs: [] };
+async function loadConjugation() {
+  try { CONJ = await (await fetch("/conjugation.json", { cache: "force-cache" })).json(); }
+  catch (e) { CONJ = { verbs: [], adjs: [] }; }
+}
+const _U2I = { "う":"い","く":"き","ぐ":"ぎ","す":"し","つ":"ち","ぬ":"に","ぶ":"び","む":"み","る":"り" };
+const _U2A = { "う":"わ","く":"か","ぐ":"が","す":"さ","つ":"た","ぬ":"な","ぶ":"ば","む":"ま","る":"ら" };
+const _TE  = { "う":"って","く":"いて","ぐ":"いで","す":"して","つ":"って","ぬ":"んで","ぶ":"んで","む":"んで","る":"って" };
+const _TA  = { "う":"った","く":"いた","ぐ":"いだ","す":"した","つ":"った","ぬ":"んだ","ぶ":"んだ","む":"んだ","る":"った" };
+function conjVerb(w, type, form) {
+  if (type === "ichidan") { const s = w.slice(0, -1); return s + { masu:"ます", te:"て", ta:"た", nai:"ない" }[form]; }
+  if (type === "suru")    { const s = w.slice(0, -2); return s + { masu:"します", te:"して", ta:"した", nai:"しない" }[form]; }
+  if (type === "kuru") {
+    if (w === "くる") return { masu:"きます", te:"きて", ta:"きた", nai:"こない" }[form];
+    const s = w.slice(0, -1); return s + { masu:"ます", te:"て", ta:"た", nai:"ない" }[form];   // 来る (한자)
+  }
+  const last = w.slice(-1), stem = w.slice(0, -1);   // godan
+  if (form === "masu") return stem + _U2I[last] + "ます";
+  if (form === "nai")  return stem + _U2A[last] + "ない";
+  if (w === "行く" || w === "いく") return stem + (form === "te" ? "って" : "った");   // 예외
+  return stem + (form === "te" ? _TE : _TA)[last];
+}
+function conjAdj(w, form) { const s = w.slice(0, -1); return s + { ta:"かった", nai:"くない", te:"くて" }[form]; }
+const VERB_FORMS = [["masu","ます형 (정중)"], ["te","て형"], ["ta","た형 (과거)"], ["nai","ない형 (부정)"]];
+const ADJ_FORMS  = [["ta","과거 (~かった)"], ["nai","부정 (~くない)"], ["te","て형 (~くて)"]];
+
+function startConjugation() {
+  const verbs = CONJ.verbs || [], adjs = CONJ.adjs || [];
+  if (!verbs.length) { showToast("데이터 불러오는 중… 잠시 후 다시"); loadConjugation(); return; }
+  const all = [...verbs.map(v => ({ v, kind: "verb" })), ...adjs.map(a => ({ v: a, kind: "adj" }))];
+  const picks = shuffleArr(all).slice(0, 10);
+  State.conj = {
+    index: 0, correct: 0,
+    items: picks.map(p => {
+      const forms = p.kind === "verb" ? VERB_FORMS : ADJ_FORMS;
+      const [f, label] = forms[Math.floor(Math.random() * forms.length)];
+      const ansK = p.kind === "verb" ? conjVerb(p.v.d, p.v.t, f) : conjAdj(p.v.d, f);
+      const ansR = p.kind === "verb" ? conjVerb(p.v.r, p.v.t, f) : conjAdj(p.v.r, f);
+      return { word: p.v.d, reading: p.v.r, meaning: p.v.m, label, ansK, ansR };
+    }),
+  };
+  showView("conj");
+  document.getElementById("conj-complete").style.display = "none";
+  document.getElementById("conj-body").style.display = "";
+  showConjQ();
+}
+function showConjQ() {
+  const S = State.conj, it = S.items[S.index];
+  if (!it) { showConjComplete(); return; }
+  document.getElementById("conj-word").textContent = it.word;
+  document.getElementById("conj-meaning").textContent = it.reading + " · " + it.meaning;
+  document.getElementById("conj-target").textContent = "→ " + it.label;
+  document.getElementById("conj-progress").textContent = `${S.index + 1} / ${S.items.length}`;
+  const inp = document.getElementById("conj-input");
+  inp.value = ""; inp.disabled = false;
+  inp.onkeydown = e => { if (e.key === "Enter") document.getElementById("conj-check").onclick(); };
+  setTimeout(() => inp.focus(), 50);
+  const btn = document.getElementById("conj-check");
+  btn.textContent = "확인"; btn.onclick = checkConj;
+  document.getElementById("conj-result").style.display = "none";
+}
+function checkConj() {
+  const S = State.conj, it = S.items[S.index];
+  const val = (document.getElementById("conj-input").value || "").trim();
+  if (!val) { showToast("답을 입력해 주세요"); return; }
+  const ok = val === it.ansK || val === it.ansR;
+  if (ok) S.correct++;
+  const r = document.getElementById("conj-result");
+  r.style.display = "block";
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div>
+    <div class="reveal-front" style="font-size:22px">${escapeHtml(it.ansK)}<span style="color:var(--text-muted);font-size:15px"> (${escapeHtml(it.ansR)})</span></div>
+    <div class="reveal-meaning">${escapeHtml(it.word)} · ${escapeHtml(it.meaning)}</div>`;
+  speak(it.ansR);
+  document.getElementById("conj-input").disabled = true;
+  const btn = document.getElementById("conj-check");
+  btn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
+  btn.onclick = () => { S.index++; showConjQ(); };
+}
+function showConjComplete() {
+  document.getElementById("conj-body").style.display = "none";
+  document.getElementById("conj-complete").style.display = "flex";
+  const t = State.conj.items.length, c = State.conj.correct;
+  document.getElementById("conj-total").textContent = t;
+  document.getElementById("conj-correct").textContent = c;
+  document.getElementById("conj-acc").textContent = (t ? Math.round(c / t * 100) : 0) + "%";
+}
+
+// ══════════════════════════════════════════════════════════
+//  듣기 연습 (받아쓰기 — 느리게·반복)
+// ══════════════════════════════════════════════════════════
+async function startListening() {
+  showView("listen");
+  document.getElementById("listen-complete").style.display = "none";
+  document.getElementById("listen-body").style.display = "";
+  document.getElementById("listen-progress").textContent = "문장 준비 중…";
+  const data = await apiFetch("/api/ai/sentences", "POST", {});
+  const items = (data.sentences || []).filter(s => s.jp && s.kr);
+  if (!items.length) { showToast(data.error || "문장이 아직 없어요. 학습을 한 번 하면 생성돼요."); showView("ai"); return; }
+  State.listen2 = { items, index: 0, correct: 0 };
+  showListen2();
+}
+function showListen2() {
+  const S = State.listen2, it = S.items[S.index];
+  if (!it) { showListenComplete(); return; }
+  document.getElementById("listen-progress").textContent = `${S.index + 1} / ${S.items.length}`;
+  const inp = document.getElementById("listen-input2");
+  inp.value = ""; inp.disabled = false;
+  inp.onkeydown = e => { if (e.key === "Enter") document.getElementById("listen-check2").onclick(); };
+  const btn = document.getElementById("listen-check2");
+  btn.textContent = "확인"; btn.onclick = checkListen2;
+  document.getElementById("listen-result2").style.display = "none";
+  listenPlayNow(1);   // 들어오면 한 번 재생
+}
+function listenPlayNow(rate) {
+  const S = State.listen2, it = S && S.items[S.index];
+  if (it) speakRate(it.jp, rate);
+}
+function checkListen2() {
+  const S = State.listen2, it = S.items[S.index];
+  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
+  const ok = norm(document.getElementById("listen-input2").value) === norm(it.jp);
+  if (ok) S.correct++;
+  const r = document.getElementById("listen-result2");
+  r.style.display = "block";
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="reveal-front" style="font-size:20px">${escapeHtml(it.jp)}</div>
+    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>`;
+  document.getElementById("listen-input2").disabled = true;
+  const btn = document.getElementById("listen-check2");
+  btn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
+  btn.onclick = () => { S.index++; showListen2(); };
+}
+function showListenComplete() {
+  document.getElementById("listen-body").style.display = "none";
+  document.getElementById("listen-complete").style.display = "flex";
+  const t = State.listen2.items.length, c = State.listen2.correct;
+  document.getElementById("listen-total2").textContent = t;
+  document.getElementById("listen-correct2").textContent = c;
+  document.getElementById("listen-acc2").textContent = (t ? Math.round(c / t * 100) : 0) + "%";
+}
+
+// ══════════════════════════════════════════════════════════
 //  공통 유틸
 // ══════════════════════════════════════════════════════════
 
@@ -1714,6 +1863,23 @@ function speak(text) {
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ja-JP";
   u.rate = 0.9;
+  window.speechSynthesis.speak(u);
+}
+
+// 속도 조절 발음 (듣기 연습 '느리게'). 네이티브 speakRate 우선, 없으면 보통/웹.
+function speakRate(text, rate) {
+  if (!text) return;
+  if (window.AndroidTTS && window.AndroidTTS.speakRate) {
+    try { window.AndroidTTS.speakRate(text, rate); return; } catch (e) {}
+  }
+  if (window.AndroidTTS && window.AndroidTTS.speak) {
+    try { window.AndroidTTS.speak(text); return; } catch (e) {}   // 구버전 네이티브: 보통 속도
+  }
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP";
+  u.rate = rate;
   window.speechSynthesis.speak(u);
 }
 

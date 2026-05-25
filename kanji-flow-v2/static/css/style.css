@@ -1982,6 +1982,18 @@ html, body {
 .lyrics-actions-grid { flex-wrap: wrap; }
 .lyrics-actions-grid .action-btn { flex: 1 1 calc(50% - 5px); }
 
+/* 활용 연습 카드 */
+.conj-card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px;
+  padding: 28px 16px; text-align: center; margin: 8px 0 16px;
+}
+.conj-word { font-size: 40px; font-weight: 700; color: var(--text-primary); }
+.conj-sub { font-size: 14px; color: var(--text-secondary); margin-top: 6px; }
+.conj-target {
+  margin-top: 14px; display: inline-block; font-size: 15px; font-weight: 700;
+  color: #8ea0ff; background: rgba(108,123,255,0.15); padding: 6px 14px; border-radius: 999px;
+}
+
 /* 읽기 사용 비율 (음독/훈독) */
 .rf-wrap { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; }
 .rf-title { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px; }

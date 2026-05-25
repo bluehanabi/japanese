@@ -33,7 +33,13 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void speak(final String text) {
             if (!ttsReady || text == null || text.isEmpty()) return;
-            runOnUiThread(() -> tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "kf"));
+            runOnUiThread(() -> { tts.setSpeechRate(1.0f); tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "kf"); });
+        }
+        // 듣기 연습 '느리게' 등 속도 조절 재생
+        @JavascriptInterface
+        public void speakRate(final String text, final double rate) {
+            if (!ttsReady || text == null || text.isEmpty()) return;
+            runOnUiThread(() -> { tts.setSpeechRate((float) rate); tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "kf"); });
         }
     }
 
