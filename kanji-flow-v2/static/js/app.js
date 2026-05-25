@@ -559,6 +559,7 @@ function flipCard() {
 
   document.getElementById("flashcard").classList.add("flipped");
   document.getElementById("rating-wrap").classList.add("visible");
+  speakCurrentCard();   // 카드를 뒤집으면 발음 자동 재생
 }
 
 function fmtDays(d) {
@@ -644,6 +645,13 @@ function endStudy() {
   showView("home");
 }
 
+// 홈 '학습 현황' 탭 → 단어장에서 여태 학습한 카드만 보여준다
+function goStudied() {
+  State.vocab.filter = "studied";
+  showView("vocab");   // showView가 이 필터로 loadVocab 실행
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+}
+
 // ══════════════════════════════════════════════════════════
 //  단어장
 // ══════════════════════════════════════════════════════════
@@ -658,6 +666,7 @@ function filterToQuery(filter) {
   if (filter === "state-new")      return "state=new";
   if (filter === "state-learning") return "state=learning";
   if (filter === "state-mastered") return "state=mastered";
+  if (filter === "studied")        return "state=studied";   // 여태 학습한 것
   return "";
 }
 
@@ -1275,6 +1284,15 @@ function toggleWriteGrid() {
 // ══════════════════════════════════════════════════════════
 
 function openQuizSetup() {
+  // 지난번에 고른 등급·문제 수를 기본값으로 복원
+  const lv = localStorage.getItem("quizLevel") || "";
+  const cnt = parseInt(localStorage.getItem("quizCount") || "15", 10);
+  State.quiz.level = lv;
+  State.quiz.count = cnt;
+  document.querySelectorAll("#quiz-level-chips .select-chip").forEach(c =>
+    c.classList.toggle("active", (c.dataset.level || "") === lv));
+  document.querySelectorAll("#quiz-count-chips .select-chip").forEach(c =>
+    c.classList.toggle("active", parseInt(c.dataset.n, 10) === cnt));
   document.getElementById("quiz-setup-overlay").classList.add("open");
 }
 function closeQuizSetup() {
@@ -1283,11 +1301,13 @@ function closeQuizSetup() {
 
 function pickQuizLevel(btn, level) {
   State.quiz.level = level;
+  localStorage.setItem("quizLevel", level);
   document.querySelectorAll("#quiz-level-chips .select-chip").forEach(c => c.classList.remove("active"));
   btn.classList.add("active");
 }
 function pickQuizCount(btn, n) {
   State.quiz.count = n;
+  localStorage.setItem("quizCount", n);
   document.querySelectorAll("#quiz-count-chips .select-chip").forEach(c => c.classList.remove("active"));
   btn.classList.add("active");
 }

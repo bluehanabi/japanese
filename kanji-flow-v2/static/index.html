@@ -81,8 +81,8 @@
 
     <!-- 카드 상태 분포 -->
     <div class="section">
-      <div class="section-title">학습 현황</div>
-      <div class="state-bar-wrap animate-in" style="animation-delay:0.15s">
+      <div class="section-title">학습 현황 <span style="color:var(--text-muted);font-weight:500;font-size:12px">› 학습한 카드 보기</span></div>
+      <div class="state-bar-wrap animate-in" style="animation-delay:0.15s;cursor:pointer" onclick="goStudied()">
         <div class="state-bar">
           <div class="state-bar-seg new"      id="bar-new"      style="flex:1"></div>
           <div class="state-bar-seg learning" id="bar-learning" style="flex:0"></div>

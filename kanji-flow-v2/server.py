@@ -442,6 +442,8 @@ def get_all_cards():
         where.append("r.repetitions > 0 AND r.interval < 21")
     elif state == "mastered":
         where.append("r.interval >= 21")
+    elif state == "studied":   # 여태 학습한 것 = 복습 이력 있음 (학습중 + 마스터)
+        where.append("r.repetitions > 0")
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -534,13 +536,19 @@ def build_quiz():
         if ctype:
             targets = [c for c in targets if c["type"] == ctype]
     else:
-        # 등급 지정이 없으면 내 학습 설정(레벨·급수·종류·카테고리) 범위로 출제
+        # 등급 지정이 없으면 내 학습 설정(레벨·급수·종류·카테고리) 범위 중
+        # '학습한 카드(복습 이력 있음)' 우선 출제. 학습한 게 부족하면 범위 전체로 보충.
         cond, sparams = _active_scope()
         conn2 = get_db()
-        scope_ids = {row[0] for row in conn2.execute(
-            f"SELECT c.id FROM cards c JOIN reviews r ON r.card_id = c.id WHERE {cond}", sparams).fetchall()}
+        rows = conn2.execute(
+            f"SELECT c.id, r.repetitions FROM cards c JOIN reviews r ON r.card_id = c.id WHERE {cond}",
+            sparams).fetchall()
         conn2.close()
-        targets = [c for c in pool if c["id"] in scope_ids]
+        scope_ids = {row[0] for row in rows}
+        studied_ids = {row[0] for row in rows if (row[1] or 0) > 0}
+        scope_cards = [c for c in pool if c["id"] in scope_ids]
+        studied_cards = [c for c in scope_cards if c["id"] in studied_ids]
+        targets = studied_cards if len(studied_cards) >= n else scope_cards
         if ctype:
             targets = [c for c in targets if c["type"] == ctype]
 
