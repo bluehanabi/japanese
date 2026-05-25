@@ -27,4 +27,6 @@ android {
 }
 
 dependencies {
+    // 카메라 촬영 결과를 받기 위한 FileProvider 제공
+    implementation 'androidx.core:core:1.13.1'
 }

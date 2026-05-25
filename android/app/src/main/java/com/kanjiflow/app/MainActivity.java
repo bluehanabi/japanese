@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.view.View;
@@ -16,6 +17,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
+import androidx.core.content.FileProvider;
+import java.io.File;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -33,6 +36,7 @@ public class MainActivity extends Activity {
 
     // <input type="file"> (번역 탭 이미지 첨부 등) 처리용
     private ValueCallback<Uri[]> filePathCallback;
+    private Uri cameraImageUri;   // 카메라 촬영 결과를 저장할 임시 파일 URI
     private static final int FILE_CHOOSER_REQUEST = 1001;
 
     // JS 에서 호출하는 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
@@ -79,18 +83,40 @@ public class MainActivity extends Activity {
                                              FileChooserParams params) {
                 if (filePathCallback != null) filePathCallback.onReceiveValue(null);
                 filePathCallback = callback;
-                Intent intent;
+                cameraImageUri = null;
+
+                // 갤러리/파일 선택
+                Intent content;
                 try {
-                    intent = params.createIntent();
+                    content = params.createIntent();
                 } catch (Exception e) {
-                    intent = new Intent(Intent.ACTION_GET_CONTENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("image/*");
+                    content = new Intent(Intent.ACTION_GET_CONTENT);
+                    content.addCategory(Intent.CATEGORY_OPENABLE);
+                    content.setType("image/*");
+                }
+
+                // 카메라 촬영 (만들 수 있을 때만 선택지에 추가)
+                Intent camera = null;
+                try {
+                    File dir = getExternalCacheDir() != null ? getExternalCacheDir() : getCacheDir();
+                    File photo = new File(dir, "cam_" + System.currentTimeMillis() + ".jpg");
+                    cameraImageUri = FileProvider.getUriForFile(
+                        MainActivity.this, getPackageName() + ".fileprovider", photo);
+                    camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                    camera.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
+                    camera.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    if (camera.resolveActivity(getPackageManager()) == null) { camera = null; cameraImageUri = null; }
+                } catch (Exception e) { camera = null; cameraImageUri = null; }
+
+                Intent chooser = Intent.createChooser(content, "이미지 선택");
+                if (camera != null) {
+                    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{ camera });
                 }
                 try {
-                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                    startActivityForResult(chooser, FILE_CHOOSER_REQUEST);
                 } catch (Exception e) {
                     filePathCallback = null;
+                    cameraImageUri = null;
                     return false;
                 }
                 return true;
@@ -133,19 +159,23 @@ public class MainActivity extends Activity {
         if (requestCode != FILE_CHOOSER_REQUEST) return;
         if (filePathCallback == null) return;
         Uri[] results = null;
-        if (resultCode == Activity.RESULT_OK && data != null) {
-            if (data.getClipData() != null) {                 // 여러 장 선택
+        if (resultCode == Activity.RESULT_OK) {
+            if (data == null || (data.getData() == null && data.getClipData() == null)) {
+                // 카메라 촬영: 우리가 지정한 파일(cameraImageUri)에 저장됨
+                if (cameraImageUri != null) results = new Uri[]{ cameraImageUri };
+            } else if (data.getClipData() != null) {          // 갤러리 여러 장 선택
                 int count = data.getClipData().getItemCount();
                 results = new Uri[count];
                 for (int i = 0; i < count; i++) {
                     results[i] = data.getClipData().getItemAt(i).getUri();
                 }
-            } else if (data.getDataString() != null) {        // 한 장 선택
+            } else if (data.getDataString() != null) {        // 갤러리 한 장 선택
                 results = new Uri[]{ Uri.parse(data.getDataString()) };
             }
         }
         filePathCallback.onReceiveValue(results);   // null 이면 웹쪽 선택 취소 처리
         filePathCallback = null;
+        cameraImageUri = null;
     }
 
     @Override
