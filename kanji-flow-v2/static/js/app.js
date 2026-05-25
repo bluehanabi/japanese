@@ -2220,6 +2220,13 @@ function cardTTSText(card) {
     return parts.join("、") || card.front;
   }
   if (card.type === "grammar") {
+    // 화면에 보이는 패턴을 그대로 읽는다: 괄호 주석·물결표·한글 제거 후 일본어(가나·한자)만
+    const jp = (card.front || "")
+      .replace(/[（(][^）)]*[）)]/g, "")                 // (ない형) 등 괄호 주석 제거
+      .replace(/[~～]/g, "")                             // 물결표 제거 (～て → て)
+      .replace(/[^぀-ヿ一-龯]/g, "");   // 일본어만 남김 (한글 주석 제거)
+    if (jp) return jp;
+    // 일본어가 없는 순수 한글 라벨(자동사·가능형 등)일 때만 예문으로 대체
     const ex = card.extra_info && card.extra_info.examples && card.extra_info.examples[0];
     return ex ? stripFurigana(ex.jp) : card.front;
   }
