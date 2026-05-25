@@ -20,7 +20,7 @@ const State = {
     hardFronts: [],     // 이번 세션에서 어려워한(몰랐음/힘들었어) 카드
   },
   vocab: {
-    filter: "all",
+    filter: "rec",
     page: 1,
     loading: false,
     done: false,
@@ -240,7 +240,7 @@ function showView(name) {
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
 function appBack() {
   // 1) 열린 오버레이부터 닫기
-  for (const id of ["translate-history-overlay", "lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
+  for (const id of ["card-detail-overlay", "translate-history-overlay", "lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
     const el = document.getElementById(id);
     if (el && el.classList.contains("open")) { el.classList.remove("open"); return "handled"; }
   }
@@ -660,6 +660,7 @@ const VOCAB_PER_PAGE = 60;
 
 // 필터 이름 → /api/cards 쿼리 파라미터
 function filterToQuery(filter) {
+  if (filter === "rec") return "personalized=1";   // 추천 = 학습한 것 중 약한 순
   if (filter === "all") return "scope=1";   // 전체 = 선택한 레벨/급수 범위
   if (filter === "kanji" || filter === "word" || filter === "grammar") return `type=${filter}`;
   if (["n5", "n4", "n3", "n2", "n1"].includes(filter)) return `level=${filter.toUpperCase()}`;
@@ -694,6 +695,7 @@ function setFilter(filter) {
   State.vocab.filter = filter;
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
   const chipMap = {
+    "rec": "chip-rec",
     "all": "chip-all", "kanji": "chip-kanji", "word": "chip-word", "grammar": "chip-grammar",
     "n5": "chip-n5", "n4": "chip-n4", "n3": "chip-n3", "n2": "chip-n2", "n1": "chip-n1",
     "state-new": "chip-new", "state-learning": "chip-learning", "state-mastered": "chip-mastered",
@@ -756,15 +758,25 @@ function onSearch(query) {
   }, 300);
 }
 
+let cdCard = null;
 function openCardDetail(id) {
   const card = (State.vocab.cards || []).find(c => c.id === id);
   if (!card) return;
-  if (card.type === "grammar") {
-    showToast(`${card.front} — ${card.back_meaning}`);
-    return;
-  }
-  openWriting([card], 0);   // 단어장에서 누르면 쓰기 연습
+  cdCard = card;
+  document.getElementById("cd-front").textContent = card.front;
+  document.getElementById("cd-sub").textContent =
+    [card.back_reading, card.back_meaning].filter(Boolean).join("  ·  ");
+  // 문법은 쓰기 연습 숨김
+  document.getElementById("cd-write-btn").style.display = card.type === "grammar" ? "none" : "";
+  document.getElementById("card-detail-overlay").classList.add("open");
+  // AI 뜻 풀이·예문 (캐시 있으면 즉시, 없으면 생성하며 스트리밍)
+  streamInto("/api/ai/explain", { card_id: card.id }, document.getElementById("cd-ai"));
 }
+function closeCardDetail() {
+  document.getElementById("card-detail-overlay").classList.remove("open");
+}
+function cdSpeak() { if (cdCard) speak(cardTTSText(cdCard)); }
+function cdWrite() { if (cdCard) { closeCardDetail(); openWriting([cdCard], 0); } }
 
 // ══════════════════════════════════════════════════════════
 //  통계

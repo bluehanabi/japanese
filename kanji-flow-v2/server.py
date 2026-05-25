@@ -422,11 +422,15 @@ def get_all_cards():
     params = []
     where = []
 
+    personalized = request.args.get("personalized") == "1"  # 추천 = 내 범위·학습한 것·약한 순
+
     # 단어장 '전체' = 설정에서 고른 레벨/급수 범위만
-    if request.args.get("scope") == "1":
+    if request.args.get("scope") == "1" or personalized:
         lc, lp = _level_scope()
         where.append(lc)
         params.extend(lp)
+    if personalized:
+        where.append("r.repetitions > 0")
     if card_type:
         where.append("c.type = ?")
         params.append(card_type)
@@ -446,13 +450,17 @@ def get_all_cards():
         where.append("r.repetitions > 0")
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    # 추천: 정답률 낮은(약한) 순 → 복습 많은 순. 그 외: 레벨/종류/id 순
+    order_sql = ("ORDER BY CAST(r.correct_count AS REAL)/MAX(r.total_reviews,1) ASC, "
+                 "r.total_reviews DESC, c.id ASC") if personalized \
+                else "ORDER BY c.jlpt_level DESC, c.type ASC, c.id ASC"
 
     rows = conn.execute(f"""
         SELECT c.*, r.repetitions, r.interval, r.ease_factor, r.next_review,
                r.total_reviews, r.correct_count
         FROM cards c JOIN reviews r ON r.card_id = c.id
         {where_sql}
-        ORDER BY c.jlpt_level DESC, c.type ASC, c.id ASC
+        {order_sql}
         LIMIT ? OFFSET ?
     """, params + [per_page, offset]).fetchall()
 
