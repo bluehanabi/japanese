@@ -1296,6 +1296,14 @@ function toggleSettingKanken(grade) {
   State.settings.active_kanken = grades.join(",");
 }
 
+async function resetProgress() {
+  if (!confirm("모든 학습 진도와 복습 기록을 초기화할까요?\n(초기화 전 자동으로 백업돼요)")) return;
+  if (!confirm("정말 초기화합니다. 되돌릴 수 없어요. 계속할까요?")) return;
+  const res = await apiFetch("/api/reset_progress", "POST", {});
+  if (res && res.ok) { showToast("진도를 초기화했어요 ✅"); location.reload(); }
+  else showToast("초기화 실패");
+}
+
 async function saveSettings() {
   await apiFetch("/api/settings", "POST", State.settings);
   showToast("✅ 설정이 저장되었어요!");

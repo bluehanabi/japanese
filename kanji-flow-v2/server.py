@@ -1566,6 +1566,19 @@ def backup_download():
                                as_attachment=True)
 
 
+@app.route("/api/reset_progress", methods=["POST"])
+def reset_progress():
+    """모든 학습 진도(SRS) 초기화 — 먼저 자동 백업 후 reviews/기록을 리셋."""
+    backup_db()   # 안전: 초기화 전 스냅샷
+    conn = get_db()
+    conn.execute("""UPDATE reviews SET ease_factor=2.5, interval=0, repetitions=0,
+                    next_review='1970-01-01', last_quality=NULL, total_reviews=0, correct_count=0""")
+    conn.execute("DELETE FROM review_log")
+    conn.execute("DELETE FROM session_log")
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
 def _backup_loop():
     """시작 직후 1회 + 24시간마다 자동 백업."""
     while True:
