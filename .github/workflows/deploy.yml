@@ -37,5 +37,6 @@ jobs:
           password: ${{ secrets.DEPLOY_PASS }}
           script: |
             cd ~/japanese/kanji-flow-v2
-            bash serve.sh --bg
+            # launchd가 서버를 관리하면 재시작만(새 코드 반영), 미설치면 옛 방식으로 직접 실행
+            launchctl kickstart -k "gui/$(id -u)/com.kanjiflow.server" 2>/dev/null || bash serve.sh --bg
             echo "배포 완료: http://192.168.10.35:8005"
