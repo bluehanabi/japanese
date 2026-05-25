@@ -42,7 +42,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f kanji-flow-v2/static/download/kanji-flow.apk
-          git commit -m "Build Kanji Flow APK [skip ci]" || { echo "변경 없음"; exit 0; }
+          # [skip ci] 안 붙임: 이 커밋이 deploy.yml 을 돌려 새 APK 를 맥(/download)에 반영.
+          # build-apk.yml 은 android/** 변경에만 돌아서 재빌드 루프는 안 생김.
+          git commit -m "Build Kanji Flow APK" || { echo "변경 없음"; exit 0; }
           git push origin HEAD:${{ github.ref_name }}
 
       - name: APK 아티팩트 업로드 (백업)

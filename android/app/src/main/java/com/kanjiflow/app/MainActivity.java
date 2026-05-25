@@ -1,12 +1,15 @@
 package com.kanjiflow.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Bundle;
 import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -27,6 +30,10 @@ public class MainActivity extends Activity {
     private long pausedAt = 0;
     private TextToSpeech tts;
     private boolean ttsReady = false;
+
+    // <input type="file"> (번역 탭 이미지 첨부 등) 처리용
+    private ValueCallback<Uri[]> filePathCallback;
+    private static final int FILE_CHOOSER_REQUEST = 1001;
 
     // JS 에서 호출하는 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
     public class TTSBridge {
@@ -65,7 +72,30 @@ public class MainActivity extends Activity {
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
         web.addJavascriptInterface(new TTSBridge(), "AndroidTTS");
 
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            // 웹의 파일 선택(<input type="file">)을 네이티브 선택창으로 연결
+            @Override
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                filePathCallback = callback;
+                Intent intent;
+                try {
+                    intent = params.createIntent();
+                } catch (Exception e) {
+                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("image/*");
+                }
+                try {
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                } catch (Exception e) {
+                    filePathCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
@@ -95,6 +125,27 @@ public class MainActivity extends Activity {
         } else {
             web.loadUrl(APP_URL);
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST) return;
+        if (filePathCallback == null) return;
+        Uri[] results = null;
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            if (data.getClipData() != null) {                 // 여러 장 선택
+                int count = data.getClipData().getItemCount();
+                results = new Uri[count];
+                for (int i = 0; i < count; i++) {
+                    results[i] = data.getClipData().getItemAt(i).getUri();
+                }
+            } else if (data.getDataString() != null) {        // 한 장 선택
+                results = new Uri[]{ Uri.parse(data.getDataString()) };
+            }
+        }
+        filePathCallback.onReceiveValue(results);   // null 이면 웹쪽 선택 취소 처리
+        filePathCallback = null;
     }
 
     @Override
