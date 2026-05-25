@@ -107,6 +107,16 @@ def _create_schema(cur):
         )
     """)
 
+    # 번역 기록 (원문 + 결과, 60일 보관)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS translation_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            source     TEXT NOT NULL,
+            result     TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
 
 def init_db():
     """스키마 생성 + (데이터 버전이 바뀌었으면) 카드 재생성."""

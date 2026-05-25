@@ -240,7 +240,7 @@ function showView(name) {
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
 function appBack() {
   // 1) 열린 오버레이부터 닫기
-  for (const id of ["lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
+  for (const id of ["translate-history-overlay", "lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
     const el = document.getElementById(id);
     if (el && el.classList.contains("open")) { el.classList.remove("open"); return "handled"; }
   }
@@ -1841,6 +1841,59 @@ function doTranslate() {
   const text = document.getElementById("translate-input").value.trim();
   if (!text) { showToast("번역할 문장을 입력해 주세요"); return; }
   streamInto("/api/ai/translate", { text }, document.getElementById("translate-result"));
+}
+
+function resetTranslate() {
+  document.getElementById("translate-input").value = "";
+  document.getElementById("translate-result").innerHTML = "";
+  document.getElementById("translate-input").focus();
+}
+
+// 번역 결과 텍스트를 결과 영역에 표시 (스트림과 동일 형식)
+function renderTranslateText(text) {
+  document.getElementById("translate-result").innerHTML =
+    `<div class="ai-text">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`;
+}
+
+async function openTranslateHistory() {
+  await loadTranslateHistory();
+  document.getElementById("translate-history-overlay").classList.add("open");
+}
+function closeTranslateHistory() {
+  document.getElementById("translate-history-overlay").classList.remove("open");
+}
+
+async function loadTranslateHistory() {
+  const wrap = document.getElementById("translate-history-list");
+  const data = await apiFetch("/api/translate/history");
+  const items = data.items || [];
+  wrap.innerHTML = items.length
+    ? items.map(it => {
+        const snip = it.source.length > 22 ? it.source.slice(0, 22) + "…" : it.source;
+        return `
+        <div class="saved-row">
+          <button class="saved-row-open" onclick="openTranslateItem(${it.id})">${escapeHtml(snip)}
+            <span style="color:var(--text-muted);font-weight:400;font-size:12px"> · ${escapeHtml((it.created_at || "").slice(5, 10))}</span></button>
+          <button class="saved-row-del" onclick="confirmDeleteTranslate(${it.id})">🗑</button>
+        </div>`;
+      }).join("")
+    : `<div style="color:var(--text-muted);font-size:13px;padding:24px;text-align:center">저장된 번역 기록이 없어요.</div>`;
+}
+
+async function openTranslateItem(id) {
+  const it = await apiFetch(`/api/translate/history/${id}`);
+  if (it.error) { showToast("불러오기 실패"); return; }
+  document.getElementById("translate-input").value = it.source || "";
+  renderTranslateText(it.result || "");
+  closeTranslateHistory();
+}
+
+function confirmDeleteTranslate(id) {
+  if (confirm("이 기록을 삭제할까요?")) deleteTranslate(id);
+}
+async function deleteTranslate(id) {
+  await apiFetch(`/api/translate/history/delete/${id}`, "POST", {});
+  loadTranslateHistory();
 }
 
 // SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)

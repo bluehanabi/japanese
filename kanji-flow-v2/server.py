@@ -1020,7 +1020,71 @@ def ai_translate():
         "(일본어 문장을 QWERTY 자판에서 로마자로 어떻게 입력하는지. 예: こんにちは → konnichiha)\n\n"
         f"입력 문장: {text}"
     )
-    return _stream_prompt_response(prompt)
+
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+
+    @stream_with_context
+    def generate():
+        acc = []
+        try:
+            for chunk in _gemini_stream(prompt, api_key, model):
+                acc.append(chunk)
+                yield _sse({"t": chunk})
+        except Exception as e:
+            import urllib.error
+            msg = (f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"
+                   if isinstance(e, urllib.error.HTTPError) else f"AI 호출 실패: {e}")
+            yield _sse({"error": msg})
+            return
+        result = "".join(acc).strip()
+        if result:
+            try: _save_translation(text, result)
+            except Exception: pass
+        yield _sse({"done": True})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _save_translation(source, result):
+    """번역 기록 저장 + 60일 지난 기록 정리."""
+    conn = get_db()
+    conn.execute("INSERT INTO translation_history (source, result, created_at) "
+                 "VALUES (?, ?, datetime('now','localtime'))", (source[:1500], result))
+    conn.execute("DELETE FROM translation_history "
+                 "WHERE created_at < datetime('now','localtime','-60 days')")
+    conn.commit(); conn.close()
+
+
+@app.route("/api/translate/history")
+def translate_history_list():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, source, created_at FROM translation_history ORDER BY id DESC LIMIT 200").fetchall()
+    conn.close()
+    return jsonify({"items": [dict(r) for r in rows]})
+
+
+@app.route("/api/translate/history/<int:hid>")
+def translate_history_item(hid):
+    conn = get_db()
+    r = conn.execute("SELECT id, source, result, created_at FROM translation_history WHERE id=?",
+                     (hid,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({"error": "없는 기록"}), 404
+    return jsonify(dict(r))
+
+
+@app.route("/api/translate/history/delete/<int:hid>", methods=["POST"])
+def translate_history_delete(hid):
+    conn = get_db()
+    conn.execute("DELETE FROM translation_history WHERE id=?", (hid,))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/ai/lyrics", methods=["POST"])

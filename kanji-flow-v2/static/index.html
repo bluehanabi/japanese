@@ -432,8 +432,28 @@
     <div class="lyrics-btn-row">
       <button class="analyze-btn ai" onclick="doTranslate()">🌐 번역하기</button>
     </div>
+    <div class="lyrics-btn-row" style="margin-top:8px">
+      <button class="analyze-btn" onclick="resetTranslate()">🗑 초기화</button>
+      <button class="analyze-btn" onclick="openTranslateHistory()">🕘 기록</button>
+    </div>
 
     <div class="lyrics-results" id="translate-result"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       번역 기록 목록
+  ══════════════════════════════════════════ -->
+  <div id="translate-history-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title">🕘 번역 기록</div>
+          <div class="overlay-sub">최근 60일간 보관돼요</div>
+        </div>
+        <div class="overlay-close" onclick="closeTranslateHistory()">✕</div>
+      </div>
+      <div id="translate-history-list"></div>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════
