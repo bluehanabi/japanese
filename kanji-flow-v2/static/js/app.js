@@ -1482,6 +1482,43 @@ function closeAI() {
   document.getElementById("ai-overlay").classList.remove("open");
 }
 
+// ── AI 허브 도구 (작문 첨삭 / 약점 리포트 / …) ───────────
+function openAITool(kind) {
+  const ov = document.getElementById("ai-tool-overlay");
+  const form = document.getElementById("ai-tool-form");
+  const body = document.getElementById("ai-tool-body");
+  form.innerHTML = "";
+  body.innerHTML = "";
+
+  if (kind === "weakness") {
+    document.getElementById("ai-tool-title").textContent = "📊 약점 리포트";
+    document.getElementById("ai-tool-sub").textContent = "복습 이력 분석";
+    ov.classList.add("open");
+    streamInto("/api/ai/weakness", {}, body);
+  } else if (kind === "correct") {
+    document.getElementById("ai-tool-title").textContent = "📝 작문 첨삭";
+    document.getElementById("ai-tool-sub").textContent = "일본어로 한 문장 써보세요";
+    form.innerHTML = `
+      <input id="ai-correct-topic" class="ai-key-input" style="margin-bottom:8px" placeholder="주제(선택) 예: 내 취미"/>
+      <textarea id="ai-correct-text" class="lyrics-textarea" style="min-height:90px;margin:0" placeholder="여기에 일본어 문장을 쓰세요"></textarea>
+      <button class="save-btn" style="margin-top:8px" onclick="submitCorrect()">✏️ 첨삭받기</button>`;
+    ov.classList.add("open");
+  } else {
+    showToast("곧 추가됩니다 🙂");
+  }
+}
+
+function submitCorrect() {
+  const text = document.getElementById("ai-correct-text").value.trim();
+  const topic = document.getElementById("ai-correct-topic").value.trim();
+  if (!text) { showToast("문장을 입력해 주세요"); return; }
+  streamInto("/api/ai/correct", { text, topic }, document.getElementById("ai-tool-body"));
+}
+
+function closeAITool() {
+  document.getElementById("ai-tool-overlay").classList.remove("open");
+}
+
 // SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)
 async function streamInto(url, payload, el) {
   el.innerHTML = '<div class="spinner"></div>';

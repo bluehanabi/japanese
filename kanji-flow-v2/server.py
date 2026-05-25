@@ -802,6 +802,85 @@ def ai_explain():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _stream_prompt_response(prompt):
+    """프롬프트 → Gemini 스트리밍 SSE Response (공통)."""
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+
+    @stream_with_context
+    def generate():
+        try:
+            for chunk in _gemini_stream(prompt, api_key, model):
+                yield _sse({"t": chunk})
+        except Exception as e:
+            import urllib.error
+            msg = (f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"
+                   if isinstance(e, urllib.error.HTTPError) else f"AI 호출 실패: {e}")
+            yield _sse({"error": msg})
+            return
+        yield _sse({"done": True})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/ai/correct", methods=["POST"])
+def ai_correct():
+    """작문 첨삭 — 사용자가 쓴 일본어 문장을 교정·설명 (SSE)."""
+    data = request.get_json() or {}
+    text = (data.get("text") or "").strip()[:1000]
+    topic = (data.get("topic") or "").strip()[:200]
+    if not text:
+        return jsonify({"error": "문장을 입력해 주세요."}), 400
+    prompt = (
+        "너는 일본어 작문 첨삭 선생님이야. 학습자가 쓴 일본어 문장을 첨삭해줘.\n"
+        + (f"주제: {topic}\n" if topic else "")
+        + f"학습자 문장: {text}\n\n"
+        "다음을 한국어로 정리해줘:\n"
+        "1) 교정된 자연스러운 문장 (후리가나 포함)\n"
+        "2) 무엇을 어떻게 고쳤는지 핵심 포인트\n"
+        "3) 더 자연스러운 다른 표현 1개\n"
+        "칭찬도 한마디. 마크다운 기호 없이 줄바꿈으로 정리."
+    )
+    return _stream_prompt_response(prompt)
+
+
+@app.route("/api/ai/weakness", methods=["POST"])
+def ai_weakness():
+    """약점 리포트 — 복습 이력/정답률/취약 카드 분석 (SSE)."""
+    today = date.today().isoformat()
+    conn = get_db()
+    weak = conn.execute("""
+        SELECT c.front, c.back_meaning, c.type, r.total_reviews, r.correct_count,
+               CAST(r.correct_count AS REAL)/MAX(r.total_reviews,1) AS acc
+        FROM cards c JOIN reviews r ON r.card_id = c.id
+        WHERE r.total_reviews >= 2
+        ORDER BY acc ASC, r.total_reviews DESC LIMIT 12
+    """).fetchall()
+    learned = conn.execute("SELECT COUNT(*) FROM reviews WHERE repetitions > 0").fetchone()[0]
+    mastered = conn.execute("SELECT COUNT(*) FROM reviews WHERE interval >= 21").fetchone()[0]
+    days = conn.execute("SELECT COUNT(DISTINCT reviewed_at) FROM review_log").fetchone()[0]
+    recent = conn.execute("""
+        SELECT COUNT(*) tot, SUM(CASE WHEN quality>=4 THEN 1 ELSE 0 END) ok
+        FROM review_log WHERE reviewed_at >= date('now','-7 days')
+    """).fetchone()
+    conn.close()
+
+    weak_str = ", ".join(f"{w['front']}({w['back_meaning']},정답률{round(w['acc']*100)}%)" for w in weak) or "아직 데이터 부족"
+    acc7 = round((recent["ok"] or 0) / max(recent["tot"] or 1, 1) * 100)
+    prompt = (
+        "너는 일본어 학습 코치야. 아래 학습 데이터를 보고 한국인 학습자에게 약점 분석 리포트를 써줘.\n"
+        f"- 학습 중인 카드: {learned}개, 마스터: {mastered}개, 학습한 날: {days}일\n"
+        f"- 최근 7일 정답률: {acc7}% (복습 {recent['tot'] or 0}회)\n"
+        f"- 정답률 낮은 항목: {weak_str}\n\n"
+        "1) 지금 상태 한줄 평가\n2) 자주 틀리는 항목에서 보이는 패턴/헷갈리는 이유 추정\n"
+        "3) 이번 주 집중 학습 제안 2~3가지\n한국어로 따뜻하게, 마크다운 기호 없이."
+    )
+    return _stream_prompt_response(prompt)
+
+
 @app.route("/api/ai/lyrics", methods=["POST"])
 def ai_lyrics():
     """일본어 가사를 AI로 분석 (SSE 스트리밍) — 주요 단어·문법·해석."""

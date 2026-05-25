@@ -534,6 +534,46 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       AI 도우미 허브
+  ══════════════════════════════════════════ -->
+  <div id="ai-view" class="view">
+    <div class="stats-header"><h2 class="stats-title">✨ AI 도우미</h2></div>
+    <div class="ai-hub">
+      <button class="ai-card" onclick="openAITool('chat')">
+        <div class="ai-card-emoji">💬</div>
+        <div><div class="ai-card-t">AI 회화 연습</div><div class="ai-card-s">내 레벨에 맞춰 일본어로 대화</div></div>
+      </button>
+      <button class="ai-card" onclick="openAITool('correct')">
+        <div class="ai-card-emoji">📝</div>
+        <div><div class="ai-card-t">작문 첨삭</div><div class="ai-card-s">일본어 문장을 쓰면 교정·설명</div></div>
+      </button>
+      <button class="ai-card" onclick="openAITool('weakness')">
+        <div class="ai-card-emoji">📊</div>
+        <div><div class="ai-card-t">약점 리포트</div><div class="ai-card-s">복습 이력 분석 + 집중 제안</div></div>
+      </button>
+      <button class="ai-card" onclick="openAITool('listen')">
+        <div class="ai-card-emoji">🎧</div>
+        <div><div class="ai-card-t">듣기 받아쓰기</div><div class="ai-card-s">문장을 듣고 받아쓰기</div></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- AI 도구 오버레이 (작문/약점 등) -->
+  <div id="ai-tool-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="ai-tool-title"></div>
+          <div class="overlay-sub" id="ai-tool-sub"></div>
+        </div>
+        <div class="overlay-close" onclick="closeAITool()">✕</div>
+      </div>
+      <div id="ai-tool-form"></div>
+      <div class="ai-body" id="ai-tool-body"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        하단 내비게이션
   ══════════════════════════════════════════ -->
   <nav id="nav">
@@ -560,6 +600,12 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
       </svg>
       가사
+    </button>
+    <button class="nav-btn" id="nav-ai" onclick="showView('ai')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>
+      </svg>
+      AI
     </button>
     <button class="nav-btn" id="nav-settings" onclick="showView('settings')">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
