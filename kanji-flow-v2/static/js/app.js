@@ -308,20 +308,12 @@ async function loadHome() {
     document.getElementById("home-done").textContent = stats.today_reviewed;
     document.getElementById("home-streak").textContent = stats.streak;
 
-    // 통합 학습 버튼 (오늘 목표를 끝내면 '추가 학습'으로 전환)
+    // 복습하기 버튼 — 여태 학습한 카드를 멀티스텝 레슨으로 (복습 예정 수 표시)
     const startBtn = document.getElementById("start-study-btn");
     startBtn.disabled = false;
-    if (today.total_due === 0) {
-      startBtn.innerHTML = `🔄 추가 학습하기 <span style="opacity:.7;font-weight:500">(오늘 목표 완료 ✅)</span>`;
-      startBtn.onclick = () => startUnified(true);
-    } else {
-      startBtn.innerHTML = `
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
-          <path d="M5 3l14 9-14 9V3z" fill="white"/>
-        </svg>
-        학습하기 (${today.total_due}개)`;
-      startBtn.onclick = () => startUnified(false);
-    }
+    const dueTxt = today.review_count > 0 ? ` (${today.review_count}개 예정)` : "";
+    startBtn.innerHTML = `🔁 복습하기${dueTxt}`;
+    startBtn.onclick = startReview;
 
     // 상태 분포 바 — 선택한 범위(레벨·급수·종류) 기준
     const nNew = stats.scope_new ?? stats.new;
@@ -793,16 +785,18 @@ async function startPathUnit(idx) {
 }
 
 // ── 멀티스텝 유닛 레슨 ───────────────────────────────────
-function startLesson(cards, unitIdx) {
+function startLesson(cards, unitIdx, mode = "path") {
   const words = cards.filter(c => c.back_meaning && c.front);
+  const kanji = cards.filter(c => c.type === "kanji");
+  const hasKey = !!(State.settings.gemini_api_key || "").trim();
   const steps = [{ type: "intro" }];
   if (words.length >= 4) steps.push({ type: "match" });
   steps.push({ type: "quiz", dir: "f2m" });
   if (words.filter(c => c.type === "word").length >= 4) steps.push({ type: "listen" });
   steps.push({ type: "quiz", dir: "m2f" });
-  const hasKey = !!(State.settings.gemini_api_key || "").trim();
-  if (hasKey) steps.push({ type: "sentence" });   // 마지막: 배운 단어로 문장 맞추기
-  State.lesson = { cards, words, steps, idx: 0, unitIdx, wrong: new Set(), mode: "path" };
+  if (hasKey && kanji.length) steps.push({ type: "writing" });   // 한자 직접 쓰기
+  if (hasKey) steps.push({ type: "sentence" });                  // 배운 단어로 문장 맞추기
+  State.lesson = { cards, words, steps, idx: 0, unitIdx, wrong: new Set(), mode };
   if (hasKey) {
     // 레슨 푸는 동안 백그라운드로 미리 생성 (문장 스텝에서 즉시 출제)
     const sw = cards.filter(c => c.type === "word").map(c => c.front);
@@ -812,7 +806,9 @@ function startLesson(cards, unitIdx) {
   runLessonStep();
 }
 function lessonExit() {
-  if (State.lesson && State.lesson.mode === "match") { showView("ai"); return; }
+  const m = State.lesson && State.lesson.mode;
+  if (m === "match") { showView("ai"); return; }
+  if (m === "review") { showView("home"); loadHome(); return; }
   showView("path"); loadPath();
 }
 function runLessonStep() {
@@ -823,6 +819,7 @@ function runLessonStep() {
   if (step.type === "match") return renderMatch(body, L.words, () => lessonNext());
   if (step.type === "quiz") return lessonQuiz(body, step.dir);
   if (step.type === "listen") return lessonListen(body);
+  if (step.type === "writing") return lessonWriting(body);
   if (step.type === "sentence") return lessonSentence(body);
 }
 function lessonNext() { State.lesson.idx++; runLessonStep(); }
@@ -904,6 +901,22 @@ function lessonListen(body) {
   }
   showQ();
 }
+// 한자 쓰기 스텝 (쓰기 오버레이 재사용, 끝나면 다음 스텝으로)
+function lessonWriting(body) {
+  const kanji = State.lesson.cards.filter(c => c.type === "kanji").slice(0, 3);
+  if (!kanji.length) { lessonNext(); return; }
+  State.lesson._wk = kanji;
+  body.innerHTML = `<div style="text-align:center;padding:40px 0">
+    <div style="font-size:54px">✍️</div>
+    <div class="complete-title" style="font-size:21px">한자 쓰기</div>
+    <div class="complete-sub">한자 ${kanji.length}개를 직접 써보세요</div>
+    <button class="start-btn" style="margin:20px 0 10px" onclick="lessonStartWriting()">쓰기 시작 →</button>
+    <button class="start-btn ghost" onclick="lessonNext()">건너뛰기</button></div>`;
+}
+function lessonStartWriting() {
+  openWriting(State.lesson._wk || [], 0, true, () => lessonNext());
+}
+
 // 유닛 단어로 문장 생성 시도 → 실패하면 일반 캐시 → 둘 다 없으면 빈 배열(스텝 스킵)
 async function fetchLessonSentences(words) {
   const d = await apiFetch("/api/ai/sentences", "POST", { words });
@@ -974,12 +987,16 @@ function finishLesson() {
   L.cards.forEach(c => apiFetch("/api/review", "POST", { card_id: c.id, answer: L.wrong.has(c.front) ? "hard" : "good" }));
   const body = document.getElementById("lesson-body");
   document.getElementById("lesson-step").textContent = "완료";
+  const review = L.mode === "review";
+  const moreBtn = review
+    ? `<button class="start-btn" style="margin:20px 0 10px" onclick="startReview()">🔁 더 복습</button>`
+    : `<button class="start-btn" style="margin:20px 0 10px" onclick="startPathUnit(${L.unitIdx + 1})">▶ 다음 유닛</button>`;
   body.innerHTML = `<div style="text-align:center;padding:36px 0">
     <div style="font-size:60px">🎉</div>
-    <div class="complete-title">유닛 완료!</div>
+    <div class="complete-title">${review ? "복습 완료!" : "유닛 완료!"}</div>
     <div class="complete-sub">${L.wrong.size === 0 ? "한 번도 안 틀렸어요! 🔥" : `틀린 단어 ${L.wrong.size}개는 곧 복습으로 나와요`}</div>
-    <button class="start-btn" style="margin:20px 0 10px" onclick="startPathUnit(${L.unitIdx + 1})">▶ 다음 유닛</button>
-    <button class="start-btn ghost" onclick="lessonExit()">🗺️ 경로로</button></div>`;
+    ${moreBtn}
+    <button class="start-btn ghost" onclick="lessonExit()">${review ? "🏠 홈으로" : "🗺️ 경로로"}</button></div>`;
 }
 
 // ── 짝 맞추기 (한국어 ↔ 일본어 매칭) ─────────────────────
@@ -1034,6 +1051,27 @@ function matchRound() {
     showToast(m === 0 ? "완벽! 🔥" : "좋아요!");
     setTimeout(matchRound, 700);
   });
+}
+
+// 복습하기 — 여태 학습한 카드(약한 순)를 멀티스텝 레슨으로 연습
+async function startReview() {
+  showToast("복습 카드 준비 중…");
+  const data = await apiFetch("/api/cards?personalized=1&per_page=8");
+  let cards = (data.cards || []).filter(c => c.front && c.back_meaning);
+  if (cards.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
+    const t = await apiFetch("/api/today");
+    const seen = new Set(cards.map(c => c.id));
+    for (const c of [...(t.review_cards || []), ...(t.new_cards || [])])
+      if (c.front && c.back_meaning && !seen.has(c.id)) cards.push(c);
+  }
+  cards = cards.slice(0, 8);
+  if (cards.length < 2) { showToast("아직 복습할 카드가 없어요. 학습 경로로 시작해 보세요!"); return; }
+  startLesson(cards, -1, "review");
+}
+
+// 랜덤 퀴즈 — 등급 선택 없이 학습 내역(학습한 카드 우선)으로 바로 출제
+async function startRandomQuiz() {
+  await launchQuiz("/api/quiz?n=15", "랜덤 퀴즈");
 }
 
 // 홈 '학습 현황' 탭 → 단어장에서 여태 학습한 카드만 보여준다
@@ -1560,11 +1598,12 @@ async function startWritingPractice() {
   openWriting(cards, 0, true);
 }
 
-function openWriting(cards, index = 0, srs = false) {
+function openWriting(cards, index = 0, srs = false, onDone = null) {
   if (!cards || cards.length === 0) { showToast("연습할 카드가 없어요"); return; }
   State.writing.cards = cards;
   State.writing.index = index;
   State.writing.srs = srs;
+  State.writing.onDone = onDone;
   State.writing.correct = 0;
   if (!State.writing.mode) State.writing.mode = "trace";
 
@@ -1674,8 +1713,9 @@ function showWritingResult(data) {
 function writingAdvance() {
   const w = State.writing;
   if (w.index >= w.cards.length - 1) {
-    showToast(`쓰기 연습 완료! 정답 ${w.correct}/${w.cards.length} ✍️`);
     closeWriting();
+    if (w.onDone) { const cb = w.onDone; w.onDone = null; cb(); return; }   // 레슨 스텝이면 다음으로
+    showToast(`쓰기 연습 완료! 정답 ${w.correct}/${w.cards.length} ✍️`);
     loadHome();
     return;
   }
