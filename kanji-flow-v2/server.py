@@ -885,12 +885,15 @@ def _gemini_generate(prompt, api_key, model):
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def _gemini_stream(prompt, api_key, model):
-    """Gemini 스트리밍 호출 — 생성되는 텍스트 조각을 순서대로 yield."""
+def _gemini_stream(prompt, api_key, model, image=None, image_mime="image/jpeg"):
+    """Gemini 스트리밍 호출 — 생성되는 텍스트 조각을 순서대로 yield. image(base64)면 비전 입력."""
     import urllib.request
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:streamGenerateContent?alt=sse&key={api_key}")
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+    parts = [{"text": prompt}]
+    if image:
+        parts.append({"inline_data": {"mime_type": image_mime, "data": image}})
+    body = json.dumps({"contents": [{"parts": parts}]}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
     resp = urllib.request.urlopen(req, timeout=60)
     for raw in resp:
@@ -1151,10 +1154,19 @@ def ai_weakness():
 
 @app.route("/api/ai/translate", methods=["POST"])
 def ai_translate():
-    """입력 문장을 한국어·일본어로 번역 + 한자/발음/설명/QWERTY 입력법 (SSE)."""
-    text = ((request.get_json() or {}).get("text") or "").strip()[:1500]
-    if not text:
-        return jsonify({"error": "번역할 문장을 입력해 주세요."}), 400
+    """입력 문장(또는 이미지)을 한국어·일본어로 번역 + 한자/발음/설명/QWERTY 입력법 (SSE)."""
+    body_in = request.get_json() or {}
+    text = (body_in.get("text") or "").strip()[:1500]
+    image = body_in.get("image")
+    image_mime = body_in.get("image_mime") or "image/jpeg"
+    if not text and not image:
+        return jsonify({"error": "번역할 문장을 입력하거나 이미지를 첨부해 주세요."}), 400
+    if image:
+        src_line = "입력: 첨부한 이미지 속 텍스트(주로 일본어)를 그대로 읽어내서 번역해줘."
+        if text:
+            src_line += f" 참고: {text}"
+    else:
+        src_line = f"입력 문장: {text}"
     prompt = (
         "너는 한국어·영어·일본어를 모두 원어민 수준으로 구사하는 번역가야 "
         "(세 언어권에서 각각 오래 산 경험이 있음).\n"
@@ -1171,7 +1183,7 @@ def ai_translate():
         "💡 설명\n(문장의 뜻·뉘앙스·어떤 상황에서 쓰는지 2~3줄로 쉽게)\n\n"
         "⌨️ 입력 방법\n"
         "(일본어 문장을 QWERTY 자판에서 로마자로 어떻게 입력하는지. 예: こんにちは → konnichiha)\n\n"
-        f"입력 문장: {text}"
+        + src_line
     )
 
     api_key = get_setting("gemini_api_key", "")
@@ -1183,7 +1195,7 @@ def ai_translate():
     def generate():
         acc = []
         try:
-            for chunk in _gemini_stream(prompt, api_key, model):
+            for chunk in _gemini_stream(prompt, api_key, model, image=image, image_mime=image_mime):
                 acc.append(chunk)
                 yield _sse({"t": chunk})
         except Exception as e:
@@ -1194,7 +1206,7 @@ def ai_translate():
             return
         result = "".join(acc).strip()
         if result:
-            try: _save_translation(text, result)
+            try: _save_translation(text or "[이미지 번역]", result)
             except Exception: pass
         yield _sse({"done": True})
 

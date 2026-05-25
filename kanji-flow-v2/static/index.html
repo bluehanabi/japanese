@@ -434,10 +434,15 @@
     </div>
 
     <textarea class="lyrics-textarea" id="translate-input"
-      placeholder="번역할 문장을 입력하세요 (한국어 / 일본어 / 영어)"></textarea>
+      placeholder="번역할 문장을 입력하세요 (한국어 / 일본어 / 영어) — 또는 아래 📷로 이미지 첨부"></textarea>
+
+    <input type="file" id="translate-file" accept="image/*" style="display:none"
+           onchange="pickTranslateImage(this)">
+    <div id="translate-img-preview" class="translate-img-preview" style="display:none"></div>
 
     <div class="lyrics-btn-row">
       <button class="analyze-btn ai" onclick="doTranslate()">🌐 번역하기</button>
+      <button class="analyze-btn" onclick="document.getElementById('translate-file').click()">📷 이미지</button>
     </div>
     <div class="lyrics-btn-row" style="margin-top:8px">
       <button class="analyze-btn" onclick="resetTranslate()">🗑 초기화</button>

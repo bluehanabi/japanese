@@ -2552,15 +2552,50 @@ async function sendChat() {
 }
 
 // ── 번역 ───────────────────────────────────────────────
+let translateImage = null;   // {data: base64, mime}
+
+// 첨부 이미지를 캔버스로 축소(최대 1024px) 후 base64 보관 → 페이로드 가볍게
+function pickTranslateImage(input) {
+  const f = input.files && input.files[0];
+  input.value = "";   // 같은 파일 다시 선택 가능하게
+  if (!f) return;
+  const img = new Image();
+  const url = URL.createObjectURL(f);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const max = 1024;
+    let w = img.width, h = img.height;
+    if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(img, 0, 0, w, h);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+    translateImage = { data: dataUrl.split(",")[1], mime: "image/jpeg" };
+    const p = document.getElementById("translate-img-preview");
+    p.style.display = "flex";
+    p.innerHTML = `<img src="${dataUrl}" alt="첨부 이미지">
+      <button class="translate-img-x" onclick="clearTranslateImage()">✕ 제거</button>`;
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); showToast("이미지를 불러오지 못했어요"); };
+  img.src = url;
+}
+function clearTranslateImage() {
+  translateImage = null;
+  const p = document.getElementById("translate-img-preview");
+  p.innerHTML = ""; p.style.display = "none";
+}
+
 function doTranslate() {
   const text = document.getElementById("translate-input").value.trim();
-  if (!text) { showToast("번역할 문장을 입력해 주세요"); return; }
-  streamInto("/api/ai/translate", { text }, document.getElementById("translate-result"));
+  if (!text && !translateImage) { showToast("문장을 입력하거나 이미지를 첨부해 주세요"); return; }
+  const payload = { text };
+  if (translateImage) { payload.image = translateImage.data; payload.image_mime = translateImage.mime; }
+  streamInto("/api/ai/translate", payload, document.getElementById("translate-result"));
 }
 
 function resetTranslate() {
   document.getElementById("translate-input").value = "";
   document.getElementById("translate-result").innerHTML = "";
+  clearTranslateImage();
   document.getElementById("translate-input").focus();
 }
 
