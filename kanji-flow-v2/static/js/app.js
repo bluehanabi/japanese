@@ -830,6 +830,9 @@ function renderLyricsResults(data) {
           <div class="result-kanji-state ${k.state}"></div>
         </div>`).join("")}
     </div>`;
+
+  // 한자 결과가 뜨는 즉시, '문장 연습'용 문장을 백그라운드로 미리 생성
+  prefetchLyricsSentences();
 }
 
 // 가사 한자로 카드(플래시) 학습
@@ -848,14 +851,38 @@ function studyCards(cards) {
 }
 function startLyricsCards() { studyCards(State.lyrics.foundCards || []); }
 
-// 가사 한자로 문장 연습 (그 글자들로 문장 생성)
+// 가사 한자로 문장을 백그라운드 미리 생성 (들어갈 때 기다림 없이 바로 시작되게)
+function prefetchLyricsSentences() {
+  const words = (State.lyrics.foundCards || []).map(c => c.front);
+  if (!words.length) return;
+  const key = words.join(",");
+  if (State.lyrics.sentFor === key && State.lyrics.sentPromise) return;   // 이미 준비/준비중
+  State.lyrics.sentFor = key;
+  State.lyrics.sentPromise = (async () => {
+    try {
+      const data = await apiFetch("/api/ai/sentences", "POST", { words });
+      return (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+    } catch (e) { return []; }
+  })();
+}
+
+// 가사 한자로 문장 연습 (미리 생성된 문장이 있으면 즉시 시작)
 async function startLyricsSentences() {
   const words = (State.lyrics.foundCards || []).map(c => c.front);
   if (!words.length) { showToast("먼저 가사를 분석해 주세요"); return; }
-  showToast("문장 만드는 중…");
-  const data = await apiFetch("/api/ai/sentences", "POST", { words });
-  const items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
-  if (!items.length) { showToast(data.error || "문장을 만들지 못했어요"); return; }
+  const key = words.join(",");
+
+  let items = null;
+  if (State.lyrics.sentFor === key && State.lyrics.sentPromise) {
+    items = await State.lyrics.sentPromise;   // 보통 이미 준비됨 (대기 없음)
+  }
+  if (!items || !items.length) {
+    showToast("문장 만드는 중…");
+    const data = await apiFetch("/api/ai/sentences", "POST", { words });
+    items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+    if (!items.length) { showToast((data && data.error) || "문장을 만들지 못했어요"); return; }
+  }
+
   State.sentence.items = items;
   State.sentence.index = 0;
   State.sentence.correct = 0;
@@ -863,6 +890,10 @@ async function startLyricsSentences() {
   document.getElementById("sent-complete").style.display = "none";
   document.getElementById("sent-body").style.display = "flex";
   showSentence(0);
+
+  // 다음 판도 바로 시작되도록 미리 다시 생성
+  State.lyrics.sentFor = null; State.lyrics.sentPromise = null;
+  prefetchLyricsSentences();
 }
 
 // ══════════════════════════════════════════════════════════
