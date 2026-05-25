@@ -153,6 +153,13 @@ function readingFreqHtml(front) {
   return `<div class="rf-wrap"><div class="rf-title">읽기 사용 비율 <span>(대략)</span></div>${body}</div>`;
 }
 
+// 쓰기 연습용 한 줄 텍스트: "음 セイ · 훈 い（きる） · …" (빈도순, 5%↑만)
+function readingFreqLine(front) {
+  const rows = READING_FREQ[front];
+  if (!rows || !rows.length) return "";
+  return rows.slice().sort((a, b) => b.p - a.p).map(x => `${x.t} ${x.r}`).join("  ·  ");
+}
+
 // 가사 입력/추출 영역(편집기) 표시 토글
 function showLyricsEditor(show) {
   document.getElementById("lyrics-editor").style.display = show ? "" : "none";
@@ -1202,7 +1209,9 @@ function renderWritingCard() {
   if (!card) return;
 
   document.getElementById("writing-meaning").textContent = card.back_meaning || card.front;
-  document.getElementById("writing-reading").textContent = card.back_reading || "";
+  // 한자면 정리된 읽기(빈도순, 음/훈 표기)만, 데이터 없으면 원본
+  document.getElementById("writing-reading").textContent =
+    (card.type === "kanji" && readingFreqLine(card.front)) || card.back_reading || "";
   document.getElementById("writing-count").textContent =
     w.cards.length > 1 ? `${w.index + 1} / ${w.cards.length}` : "";
 
