@@ -12,12 +12,10 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
 
-    // 집 와이파이(내부망) 우선, 실패하면 외부망으로 자동 전환
-    private static final String LAN = "http://192.168.10.35:8005/";
-    private static final String WAN = "http://211.109.91.64:8005/";
+    // 외부 접속 전용 (어느 네트워크에서나 동일하게 접속)
+    private static final String APP_URL = "http://211.109.91.64:8005/";
 
     private WebView web;
-    private boolean triedFallback = false;
     private long pausedAt = 0;
     private TextToSpeech tts;
     private boolean ttsReady = false;
@@ -53,23 +51,14 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new TTSBridge(), "AndroidTTS");
 
         web.setWebChromeClient(new WebChromeClient());
-        web.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                // 내부망 접속 실패 시 한 번만 외부망으로 재시도
-                if (!triedFallback && failingUrl != null && failingUrl.startsWith(LAN)) {
-                    triedFallback = true;
-                    view.loadUrl(WAN);
-                }
-            }
-        });
+        web.setWebViewClient(new WebViewClient());
 
         setContentView(web);
 
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
         } else {
-            web.loadUrl(LAN);
+            web.loadUrl(APP_URL);
         }
     }
 
