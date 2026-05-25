@@ -12,6 +12,9 @@ venv/
 *.sqlite
 *.sqlite3
 
+# 자동 백업 (런타임 생성)
+backups/
+
 # Android 빌드 산출물
 kanji-app/build/
 kanji-app/app/build/

@@ -5,9 +5,12 @@ SQLite 데이터베이스 초기화 및 초기 데이터 INSERT
 import sqlite3
 import json
 import os
-from datetime import date
+from datetime import date, datetime
+from glob import glob
 
 DB_PATH = "kanji_flow.db"
+BACKUP_DIR = "backups"
+BACKUP_KEEP = 14   # 최근 N개 백업만 보관
 DATA_FILE = os.path.join(os.path.dirname(__file__), "anki_cards.json")
 # 데이터 버전 — 이 값이 바뀌면 배포 시 카드 DB를 자동으로 재생성한다.
 DATA_VERSION = "anki-jlpt-2025-09c"
@@ -224,6 +227,31 @@ def set_setting(key: str, value: str):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
     conn.commit()
     conn.close()
+
+
+def backup_db():
+    """DB를 일관된 스냅샷으로 backups/ 에 저장하고, 최근 N개만 남긴다. 저장 경로 반환."""
+    if not os.path.exists(DB_PATH):
+        return None
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dst_path = os.path.join(BACKUP_DIR, f"kanji_flow-{ts}.db")
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(dst_path)
+    try:
+        with dst:
+            src.backup(dst)   # WAL 포함 일관된 온라인 백업
+    finally:
+        dst.close()
+        src.close()
+    # 오래된 백업 정리
+    files = sorted(glob(os.path.join(BACKUP_DIR, "kanji_flow-*.db")))
+    for f in files[:-BACKUP_KEEP]:
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    return dst_path
 
 
 if __name__ == "__main__":

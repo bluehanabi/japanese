@@ -74,6 +74,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   setGreeting();
   document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
   loadReadingFreq();
+  flushReviewOutbox();                                  // 오프라인 중 쌓인 평가 동기화
+  window.addEventListener("online", flushReviewOutbox); // 연결 복구 시 재동기화
   await loadHome();
   await loadSettings();
 
@@ -344,13 +346,52 @@ async function loadHome() {
 //  학습 세션
 // ══════════════════════════════════════════════════════════
 
+// ── 오프라인 복원력: 서버가 잠깐 죽어도 저장된 카드로 학습, 평가는 큐에 모아 복구 시 동기화 ──
+function _ok(res) { return res && Object.keys(res).length > 0; }
+
+async function fetchTodayQueue(extra) {
+  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  if (data.review_cards || data.new_cards) {
+    try { localStorage.setItem("todayCache", JSON.stringify(data)); } catch (e) {}
+    return data;
+  }
+  // 서버 불가 → 마지막으로 저장된 카드로 학습
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("todayCache") || "null"); } catch (e) {}
+  if (cached && (cached.review_cards || cached.new_cards)) {
+    showToast("오프라인: 저장된 카드로 학습합니다 📦");
+    return cached;
+  }
+  return data;
+}
+
+function queueReview(card_id, answer) {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem("reviewOutbox") || "[]"); } catch (e) {}
+  q.push({ card_id, answer });
+  try { localStorage.setItem("reviewOutbox", JSON.stringify(q)); } catch (e) {}
+}
+
+async function flushReviewOutbox() {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem("reviewOutbox") || "[]"); } catch (e) { return; }
+  if (!q.length) return;
+  const remain = [];
+  for (const it of q) {
+    const res = await apiFetch("/api/review", "POST", it);
+    if (!_ok(res)) remain.push(it);
+  }
+  try { localStorage.setItem("reviewOutbox", JSON.stringify(remain)); } catch (e) {}
+  if (remain.length === 0) showToast(`오프라인 학습 ${q.length}건 동기화됐어요 ✅`);
+}
+
 async function startStudy(extra = false) {
-  let data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  let data = await fetchTodayQueue(extra);
   let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
   // 오늘치를 끝냈으면 자동으로 추가 학습으로 전환
   if (queue.length === 0 && !extra) {
     extra = true;
-    data = await apiFetch("/api/today?extra=1") || {};
+    data = await fetchTodayQueue(true);
     queue = [...(data.review_cards || []), ...(data.new_cards || [])];
   }
   if (queue.length === 0) {
@@ -378,11 +419,11 @@ async function startStudy(extra = false) {
 
 // 통합 학습 — 카드마다 플래시카드/사지선다를 자동으로 섞어 연속 출제
 async function startUnified(extra = false) {
-  let data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  let data = await fetchTodayQueue(extra);
   let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
   if (queue.length === 0 && !extra) {
     extra = true;
-    data = await apiFetch("/api/today?extra=1") || {};
+    data = await fetchTodayQueue(true);
     queue = [...(data.review_cards || []), ...(data.new_cards || [])];
   }
   if (queue.length === 0) {
@@ -613,8 +654,9 @@ async function submitRating(answer) {
   if (answer === "good" || answer === "easy") State.study.sessionCorrect++;
   else State.study.hardFronts.push(card.front);   // 몰랐음/힘들었어 → 약점 기록
 
-  // API 호출
-  apiFetch("/api/review", "POST", { card_id: card.id, answer });
+  // API 호출 (실패하면 오프라인 큐에 저장 → 복구 시 자동 동기화)
+  apiFetch("/api/review", "POST", { card_id: card.id, answer })
+    .then(res => { if (!_ok(res)) queueReview(card.id, answer); });
 
   // 다음 (통합이면 형식 섞어서, 아니면 다음 카드)
   studyNext();

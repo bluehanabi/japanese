@@ -7,10 +7,11 @@ import os
 import re
 import random
 import threading
+import time
 from datetime import date, timedelta
 from flask import Flask, jsonify, request, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
-from database import get_db, init_db, get_setting, set_setting
+from database import get_db, init_db, get_setting, set_setting, backup_db, BACKUP_DIR
 from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_interval
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -1419,10 +1420,31 @@ def update_settings():
 #  실행
 # ══════════════════════════════════════════════════════════
 
+@app.route("/api/backup/download")
+def backup_download():
+    """현재 학습 DB의 일관된 스냅샷을 내려받는다 (오프사이트 보관용)."""
+    path = backup_db()
+    if not path:
+        return jsonify({"error": "백업할 DB가 없어요."}), 404
+    return send_from_directory(os.path.dirname(path) or ".", os.path.basename(path),
+                               as_attachment=True)
+
+
+def _backup_loop():
+    """시작 직후 1회 + 24시간마다 자동 백업."""
+    while True:
+        try:
+            backup_db()
+        except Exception as e:
+            print(f"[backup] 실패: {e}")
+        time.sleep(24 * 3600)
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("  Kanji Flow 2.0 서버 시작 중...")
     print("=" * 50)
     init_db()
-    print("[서버] http://0.0.0.0:8005 에서 실행 중")
+    threading.Thread(target=_backup_loop, daemon=True).start()
+    print(f"[서버] http://0.0.0.0:8005 에서 실행 중 (자동 백업: {BACKUP_DIR}/)")
     app.run(host="0.0.0.0", port=8005, debug=False)
