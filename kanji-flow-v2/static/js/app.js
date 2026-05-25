@@ -150,19 +150,19 @@ async function loadHome() {
     document.getElementById("home-done").textContent = stats.today_reviewed;
     document.getElementById("home-streak").textContent = stats.streak;
 
-    // 학습 시작 버튼 (오늘 목표를 끝내면 '추가 학습'으로 전환)
+    // 통합 학습 버튼 (오늘 목표를 끝내면 '추가 학습'으로 전환)
     const startBtn = document.getElementById("start-study-btn");
     startBtn.disabled = false;
     if (today.total_due === 0) {
       startBtn.innerHTML = `🔄 추가 학습하기 <span style="opacity:.7;font-weight:500">(오늘 목표 완료 ✅)</span>`;
-      startBtn.onclick = () => startStudy(true);
+      startBtn.onclick = () => startUnified(true);
     } else {
       startBtn.innerHTML = `
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
           <path d="M5 3l14 9-14 9V3z" fill="white"/>
         </svg>
-        지금 바로 학습 시작 (${today.total_due}개)`;
-      startBtn.onclick = () => startStudy(false);
+        학습하기 (${today.total_due}개)`;
+      startBtn.onclick = () => startUnified(false);
     }
 
     // 상태 분포 바 — 선택한 범위(레벨·급수·종류) 기준
@@ -211,6 +211,7 @@ async function startStudy(extra = false) {
   // 복습 카드 먼저, 그 다음 신규
   State.study.queue = queue;
   State.study.extra = extra;
+  State.study.unified = false;
   State.study.index = 0;
   State.study.sessionCorrect = 0;
   State.study.sessionTotal = 0;
@@ -219,12 +220,116 @@ async function startStudy(extra = false) {
   showCard(0);
 }
 
+// 통합 학습 — 카드마다 플래시카드/사지선다를 자동으로 섞어 연속 출제
+async function startUnified(extra = false) {
+  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  const queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  if (queue.length === 0) {
+    showToast(extra ? "더 학습할 카드가 없어요 🎉" : "오늘 학습할 카드가 없어요");
+    return;
+  }
+  showView("study");
+  document.getElementById("study-complete").style.display = "none";
+  State.study.queue = queue;
+  State.study.extra = extra;
+  State.study.unified = true;
+  State.study.index = 0;
+  State.study.sessionCorrect = 0;
+  State.study.sessionTotal = 0;
+  State.study.hardFronts = [];
+  showUnifiedStep(0);
+}
+
+function studyNext() {
+  if (State.study.unified) showUnifiedStep(State.study.index + 1);
+  else showCard(State.study.index + 1);
+}
+
+function showUnifiedStep(i) {
+  const q = State.study.queue;
+  if (i >= q.length) { showStudyComplete(); return; }
+  // 보기가 충분하면 50% 확률로 사지선다, 아니면 플래시카드
+  const fmt = (q.length >= 4 && Math.random() < 0.5) ? "choice" : "flash";
+  if (fmt === "flash") {
+    document.getElementById("uni-choice").style.display = "none";
+    document.getElementById("flashcard-scene").style.display = "block";
+    showCard(i);
+  } else {
+    showUniChoice(i);
+  }
+}
+
+const TYPE_LABEL_U = { kanji: "한자", word: "단어", grammar: "문법" };
+
+function showUniChoice(i) {
+  const q = State.study.queue;
+  const card = q[i];
+  State.study.index = i;
+
+  document.getElementById("study-progress").style.width = Math.round(i / q.length * 100) + "%";
+  document.getElementById("study-progress-text").textContent = `${i} / ${q.length}`;
+  const tb = document.getElementById("study-type-badge");
+  tb.textContent = TYPE_LABEL_U[card.type] || "단어";
+  tb.className = `card-type-badge badge-${card.type}`;
+
+  document.getElementById("flashcard-scene").style.display = "none";
+  document.getElementById("rating-wrap").classList.remove("visible");
+  document.getElementById("uni-choice").style.display = "flex";
+
+  const dir = Math.random() < 0.5 ? "f2m" : "m2f";
+  let prompt, answer, pool, dirLabel;
+  if (dir === "f2m") {
+    prompt = card.front; answer = card.back_meaning;
+    pool = q.map(c => c.back_meaning); dirLabel = "뜻을 고르세요";
+  } else {
+    prompt = card.back_meaning; answer = card.front;
+    pool = q.map(c => c.front); dirLabel = "알맞은 한자/단어를 고르세요";
+  }
+  document.getElementById("uni-choice-dir").textContent = dirLabel;
+  const promptEl = document.getElementById("uni-choice-prompt");
+  promptEl.textContent = prompt;
+  promptEl.classList.toggle("small", prompt.length > 6);
+
+  const distract = [...new Set(pool.filter(x => x && x !== answer))];
+  shuffleArr(distract);
+  const opts = shuffleArr([answer, ...distract.slice(0, 3)]);
+  State.study.uniOpts = opts;
+  State.study.uniAnswer = answer;
+  State.study.uniAnswered = false;
+  document.getElementById("uni-choice-options").innerHTML = opts.map((o, idx) =>
+    `<button class="quiz-option" onclick="answerUniChoice(this, ${idx})">${escapeHtml(o)}</button>`).join("");
+}
+
+function answerUniChoice(btn, idx) {
+  if (State.study.uniAnswered) return;
+  State.study.uniAnswered = true;
+  const card = State.study.queue[State.study.index];
+  const correct = State.study.uniOpts[idx] === State.study.uniAnswer;
+
+  document.querySelectorAll("#uni-choice-options .quiz-option").forEach((b, j) => {
+    b.classList.add("disabled");
+    if (State.study.uniOpts[j] === State.study.uniAnswer) b.classList.add("correct");
+  });
+  if (!correct) btn.classList.add("wrong");
+
+  const answer = correct ? "good" : "again";
+  State.study.sessionTotal++;
+  if (correct) State.study.sessionCorrect++; else State.study.hardFronts.push(card.front);
+  apiFetch("/api/review", "POST", { card_id: card.id, answer });
+  speak(cardTTSText(card));
+  setTimeout(() => showUnifiedStep(State.study.index + 1), correct ? 750 : 1400);
+}
+
 function showCard(index) {
   const queue = State.study.queue;
   if (index >= queue.length) {
     showStudyComplete();
     return;
   }
+
+  // 통합 학습의 사지선다 패널 숨기고 플래시카드 표시
+  document.getElementById("uni-choice").style.display = "none";
+  document.getElementById("flashcard-scene").style.display = "block";
 
   State.study.index = index;
   State.study.flipped = false;
@@ -349,8 +454,8 @@ async function submitRating(answer) {
   // API 호출
   apiFetch("/api/review", "POST", { card_id: card.id, answer });
 
-  // 다음 카드로
-  showCard(State.study.index + 1);
+  // 다음 (통합이면 형식 섞어서, 아니면 다음 카드)
+  studyNext();
 }
 
 function showStudyComplete() {

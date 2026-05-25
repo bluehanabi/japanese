@@ -1841,3 +1841,42 @@ html, body {
   background: none;
   margin-left: 4px;
 }
+
+/* ── 홈 4버튼 그리드 ─────────────────────────────────── */
+.home-grid4 { flex-wrap: wrap; }
+.home-grid4 .action-btn { flex: 1 1 calc(50% - 5px); }
+
+/* ── 통합 학습 사지선다 패널 ─────────────────────────── */
+.uni-choice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin: 8px 20px;
+  min-height: 260px;
+}
+.uni-choice-dir {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  padding: 6px 14px;
+  border-radius: 999px;
+  align-self: center;
+}
+.uni-choice-prompt {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-jp);
+  font-size: 64px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-primary);
+  padding: 16px 0;
+}
+.uni-choice-prompt.small { font-size: 30px; }
+.uni-choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

@@ -44,27 +44,27 @@
       </div>
     </div>
 
-    <!-- 학습 시작 버튼 -->
-    <button class="start-btn" id="start-study-btn" onclick="startStudy(false)">
+    <!-- 통합 학습 (여러 형식 자동 섞기) -->
+    <button class="start-btn" id="start-study-btn" onclick="startUnified(false)">
       <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
         <path d="M5 3l14 9-14 9V3z" fill="white"/>
       </svg>
-      지금 바로 학습 시작
+      학습하기
     </button>
 
-    <!-- 보조 액션: 랜덤 퀴즈 / 쓰기 연습 -->
-    <div class="home-actions">
+    <!-- 단독 연습 4개 -->
+    <div class="home-actions home-grid4">
+      <button class="action-btn" onclick="startStudy(false)">
+        <span class="action-emoji">🃏</span><span>카드 학습</span>
+      </button>
       <button class="action-btn" onclick="openQuizSetup()">
-        <span class="action-emoji">🎯</span>
-        <span>랜덤 퀴즈</span>
+        <span class="action-emoji">🎯</span><span>랜덤 퀴즈</span>
       </button>
       <button class="action-btn" onclick="startWritingPractice()">
-        <span class="action-emoji">✍️</span>
-        <span>쓰기 연습</span>
+        <span class="action-emoji">✍️</span><span>쓰기 연습</span>
       </button>
       <button class="action-btn" onclick="startSentencePractice()">
-        <span class="action-emoji">🧩</span>
-        <span>문장 연습</span>
+        <span class="action-emoji">🧩</span><span>문장 연습</span>
       </button>
     </div>
 
@@ -153,6 +153,13 @@
           <div class="card-words" id="card-back-words"></div>
         </div>
       </div>
+    </div>
+
+    <!-- 통합 학습용 사지선다 패널 -->
+    <div class="uni-choice" id="uni-choice" style="display:none">
+      <div class="uni-choice-dir" id="uni-choice-dir"></div>
+      <div class="uni-choice-prompt" id="uni-choice-prompt"></div>
+      <div class="uni-choice-options" id="uni-choice-options"></div>
     </div>
 
     <!-- 평가 버튼 -->
