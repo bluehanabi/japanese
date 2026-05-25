@@ -45,6 +45,79 @@ def _freq_pick(rows, n):
     keyed.sort(key=lambda t: t[0])
     return [r for _, r in keyed[:n]]
 
+
+# 학습 경로 (섹션→유닛, CEJC+jpdb 빈도 기반)
+PATH = {"sections": []}
+try:
+    with open(os.path.join("static", "path.json"), encoding="utf-8") as _pf:
+        PATH = json.load(_pf)
+except Exception:
+    PATH = {"sections": []}
+
+
+def _card_dict(row):
+    dd = dict(row)
+    if dd.get("extra_info"):
+        try:
+            dd["extra_info"] = json.loads(dd["extra_info"])
+        except Exception:
+            pass
+    dd["state"] = get_card_state(dd["repetitions"], dd["interval"])
+    rep, ef, iv = dd["repetitions"], dd["ease_factor"], dd["interval"]
+    dd["hints"] = {a: predict_interval(rep, ef, iv, a) for a in ("again", "hard", "good", "easy")}
+    return dd
+
+
+@app.route("/api/path/status")
+def path_status():
+    """각 유닛의 상태(0=미완/진행, 1=완료, 2=마스터)를 SRS 기록에서 계산."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT c.type t, c.front f, r.repetitions rep, r.interval iv "
+        "FROM cards c JOIN reviews r ON r.card_id = c.id").fetchall()
+    conn.close()
+    st = {}
+    for row in rows:
+        st.setdefault((row["t"], row["f"]), (row["rep"], row["iv"]))
+    sections, status = [], []
+    for sec in PATH.get("sections", []):
+        sections.append({"title": sec["title"], "units": len(sec["units"])})
+        for unit in sec["units"]:
+            reps, ivs = [], []
+            for ref in unit:
+                t, _, f = ref.partition(":")
+                rep, iv = st.get((t, f), (0, 0))
+                reps.append(rep); ivs.append(iv)
+            if reps and all(i >= 21 for i in ivs):
+                status.append(2)
+            elif reps and all(rp > 0 for rp in reps):
+                status.append(1)
+            else:
+                status.append(0)
+    return jsonify({"sections": sections, "status": status})
+
+
+@app.route("/api/unit_cards", methods=["POST"])
+def unit_cards():
+    """유닛 카드 ref('type:front') 목록 → 전체 카드 데이터 반환 (순서 유지)."""
+    refs = (request.get_json() or {}).get("refs", [])
+    pairs = [(r.split(":", 1)[0], r.split(":", 1)[1]) for r in refs if ":" in r]
+    fronts = list({f for _, f in pairs})
+    if not fronts:
+        return jsonify({"cards": []})
+    conn = get_db()
+    q = ("SELECT c.*, r.ease_factor, r.interval, r.repetitions, r.next_review, "
+         "r.total_reviews, r.correct_count, r.id as review_id "
+         "FROM cards c JOIN reviews r ON r.card_id = c.id WHERE c.front IN (%s)"
+         % ",".join("?" * len(fronts)))
+    rows = conn.execute(q, fronts).fetchall()
+    conn.close()
+    by = {}
+    for row in rows:
+        by.setdefault((row["type"], row["front"]), row)
+    out = [_card_dict(by[(t, f)]) for t, f in pairs if (t, f) in by]
+    return jsonify({"cards": out})
+
 # ── 선택적 비밀번호 게이트 (환경변수 APP_PASSWORD 설정 시 활성) ──
 import hashlib
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")

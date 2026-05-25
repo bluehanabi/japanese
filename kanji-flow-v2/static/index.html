@@ -44,6 +44,12 @@
       </div>
     </div>
 
+    <!-- 학습 경로 (듀오링고식) -->
+    <button class="start-btn" onclick="showView('path')"
+            style="background:linear-gradient(135deg,#22c55e,#16a34a);margin-bottom:10px">
+      🗺️ 학습 경로
+    </button>
+
     <!-- 통합 학습 (여러 형식 자동 섞기) -->
     <button class="start-btn" id="start-study-btn" onclick="startUnified(false)">
       <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
@@ -209,10 +215,10 @@
         </div>
       </div>
       <div class="complete-ai" id="complete-ai" style="display:none"></div>
-      <button class="start-btn" onclick="startStudy(true)" style="margin:0 0 10px">
+      <button class="start-btn" id="complete-more" onclick="startStudy(true)" style="margin:0 0 10px">
         🔄 더 학습하기
       </button>
-      <button class="start-btn ghost" onclick="showView('home'); loadHome();" style="margin:0">
+      <button class="start-btn ghost" id="complete-home" onclick="showView('home'); loadHome();" style="margin:0">
         홈으로 돌아가기
       </button>
     </div>
@@ -455,6 +461,17 @@
       </div>
       <div id="translate-history-list"></div>
     </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       학습 경로 (섹션 → 챕터 → 유닛)
+  ══════════════════════════════════════════ -->
+  <div id="path-view" class="view">
+    <div class="vocab-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:4px;">🗺️ 학습 경로</h2>
+      <p style="font-size:13px;color:var(--text-secondary)" id="path-sub">자주 쓰는 것부터 차근차근</p>
+    </div>
+    <div id="path-list"><div class="spinner"></div></div>
   </div>
 
   <!-- ══════════════════════════════════════════

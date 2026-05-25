@@ -1982,6 +1982,19 @@ html, body {
 .lyrics-actions-grid { flex-wrap: wrap; }
 .lyrics-actions-grid .action-btn { flex: 1 1 calc(50% - 5px); }
 
+/* 학습 경로 */
+#path-list { padding: 0 16px 80px; }
+.path-section { margin-bottom: 16px; }
+.path-sec-head { display:flex; justify-content:space-between; align-items:center; padding:10px 4px 6px; font-weight:700; font-size:15px; color:var(--text-primary); position:sticky; top:0; background:var(--bg-deep); z-index:1; }
+.path-sec-prog { font-size:12px; color:var(--text-muted); font-weight:600; }
+.path-chapter { display:flex; flex-wrap:wrap; gap:10px; padding:4px 0 10px; }
+.path-node { width:52px; height:52px; border-radius:50%; border:none; font-size:16px; font-weight:700; cursor:pointer; font-family:var(--font-kr); display:flex; align-items:center; justify-content:center; transition:transform .1s; }
+.path-node:active { transform:scale(0.92); }
+.path-node.open { background:var(--bg-panel); color:var(--text-primary); border:2px solid var(--indigo); }
+.path-node.done { background:linear-gradient(135deg,#22c55e,#16a34a); color:#fff; }
+.path-node.mastered { background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; }
+.path-node.locked { background:var(--bg-card); color:var(--text-muted); opacity:.5; cursor:default; }
+
 /* 활용 연습 카드 */
 .conj-card {
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px;

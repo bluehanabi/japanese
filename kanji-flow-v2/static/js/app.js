@@ -84,7 +84,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 마지막으로 보던 탭 복원 (앱을 껐다 켜도 그 탭 유지)
   const lastTab = localStorage.getItem("lastTab");
   if (lastTab && lastTab !== "home" &&
-      ["vocab", "stats", "lyrics", "translate", "ai", "settings"].includes(lastTab)) {
+      ["vocab", "stats", "lyrics", "translate", "ai", "settings", "path"].includes(lastTab)) {
     showView(lastTab);
   }
 });
@@ -258,11 +258,12 @@ function showView(name) {
   State.currentView = name;
 
   // 메인 탭이면 마지막 탭으로 기억 (앱 재실행/새로고침 시 복원)
-  if (["home", "vocab", "stats", "lyrics", "translate", "ai", "settings"].includes(name)) {
+  if (["home", "vocab", "stats", "lyrics", "translate", "ai", "settings", "path"].includes(name)) {
     localStorage.setItem("lastTab", name);
   }
 
   // 뷰별 데이터 로드
+  if (name === "path")     loadPath();
   if (name === "vocab")    loadVocab();
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
@@ -678,6 +679,17 @@ function showStudyComplete() {
   document.getElementById("complete-correct").textContent  = correct;
   document.getElementById("complete-accuracy").textContent = pct + "%";
 
+  // 경로 유닛이면 완료 버튼을 '다음 유닛 / 경로로'로 바꾼다
+  const more = document.getElementById("complete-more"), home = document.getElementById("complete-home");
+  if (State.study.returnTo === "path") {
+    const nxt = (State.study.unitIdx ?? -1) + 1;
+    more.textContent = "▶ 다음 유닛"; more.onclick = () => startPathUnit(nxt);
+    home.textContent = "🗺️ 경로로"; home.onclick = () => { State.study.returnTo = null; showView("path"); loadPath(); };
+  } else {
+    more.textContent = "🔄 더 학습하기"; more.onclick = () => startStudy(true);
+    home.textContent = "홈으로 돌아가기"; home.onclick = () => { showView("home"); loadHome(); };
+  }
+
   const subs = [
     "훌륭합니다! 매일 조금씩 쌓이는 게 실력이에요 💪",
     "오늘도 한자 하나 더 마스터! 🎌",
@@ -718,7 +730,72 @@ async function saveSessionDigest(total, correct) {
 }
 
 function endStudy() {
+  if (State.study.returnTo === "path") { State.study.returnTo = null; showView("path"); loadPath(); return; }
   showView("home");
+}
+
+// ══════════════════════════════════════════════════════════
+//  학습 경로 (섹션 → 챕터 → 유닛)
+// ══════════════════════════════════════════════════════════
+var PATH_DATA = null, PATH_UNITS = [];
+async function loadPathData() {
+  if (PATH_DATA) return PATH_DATA;
+  try {
+    PATH_DATA = await (await fetch("/path.json", { cache: "force-cache" })).json();
+    PATH_UNITS = [];
+    for (const sec of PATH_DATA.sections) for (const u of sec.units) PATH_UNITS.push(u);
+  } catch (e) { PATH_DATA = { sections: [] }; }
+  return PATH_DATA;
+}
+
+async function loadPath() {
+  const wrap = document.getElementById("path-list");
+  wrap.innerHTML = '<div class="spinner"></div>';
+  await loadPathData();
+  const st = await apiFetch("/api/path/status");
+  const status = st.status || [], secs = st.sections || [];
+  const doneCnt = status.filter(s => s >= 1).length;
+  document.getElementById("path-sub").textContent =
+    `완료 ${doneCnt} / ${status.length} 유닛 · 자주 쓰는 것부터`;
+  let gi = 0, html = "";
+  secs.forEach(sec => {
+    const start = gi, secStatus = status.slice(gi, gi + sec.units);
+    const secDone = secStatus.filter(s => s >= 1).length;
+    html += `<div class="path-section"><div class="path-sec-head"><span>${escapeHtml(sec.title)}</span>` +
+            `<span class="path-sec-prog">${secDone}/${sec.units}</span></div>`;
+    for (let c = 0; c < sec.units; c += 8) {
+      html += `<div class="path-chapter">`;
+      for (let u = c; u < Math.min(c + 8, sec.units); u++) {
+        const idx = start + u, s = status[idx] || 0;
+        const unlocked = idx === 0 || (status[idx - 1] || 0) >= 1;
+        const clickable = unlocked || s >= 1;
+        const cls = s === 2 ? "mastered" : s === 1 ? "done" : clickable ? "open" : "locked";
+        const icon = s === 2 ? "👑" : s === 1 ? "✓" : clickable ? (u + 1) : "🔒";
+        html += `<button class="path-node ${cls}" ${clickable ? `onclick="startPathUnit(${idx})"` : "disabled"}>${icon}</button>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+    gi += sec.units;
+  });
+  wrap.innerHTML = html || '<div style="padding:40px;text-align:center;color:var(--text-muted)">경로 데이터가 없어요</div>';
+}
+
+async function startPathUnit(idx) {
+  await loadPathData();
+  const refs = PATH_UNITS[idx];
+  if (!refs) return;
+  showToast("불러오는 중…");
+  const data = await apiFetch("/api/unit_cards", "POST", { refs });
+  const cards = data.cards || [];
+  if (!cards.length) { showToast("카드를 불러오지 못했어요"); return; }
+  showView("study");
+  document.getElementById("study-complete").style.display = "none";
+  Object.assign(State.study, {
+    queue: cards, unified: true, extra: false, index: 0,
+    sessionCorrect: 0, sessionTotal: 0, hardFronts: [], returnTo: "path", unitIdx: idx,
+  });
+  showUnifiedStep(0);
 }
 
 // 홈 '학습 현황' 탭 → 단어장에서 여태 학습한 카드만 보여준다
