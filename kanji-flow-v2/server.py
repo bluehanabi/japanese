@@ -996,6 +996,33 @@ def ai_weakness():
     return _stream_prompt_response(prompt)
 
 
+@app.route("/api/ai/translate", methods=["POST"])
+def ai_translate():
+    """입력 문장을 한국어·일본어로 번역 + 한자/발음/설명/QWERTY 입력법 (SSE)."""
+    text = ((request.get_json() or {}).get("text") or "").strip()[:1500]
+    if not text:
+        return jsonify({"error": "번역할 문장을 입력해 주세요."}), 400
+    prompt = (
+        "너는 한국어·영어·일본어를 모두 원어민 수준으로 구사하는 번역가야 "
+        "(세 언어권에서 각각 오래 산 경험이 있음).\n"
+        "먼저 입력 문장을 한국어·영어·일본어 세 언어로 번역하고, 세 번역의 의미가 서로 "
+        "일치하는지 스스로 검토해. (번역·검토 과정은 출력하지 마.)\n"
+        "그런 다음 아래 형식 그대로, 한국어와 일본어만 보여줘. "
+        "마크다운 기호(*, #, - 등)는 쓰지 말고 줄바꿈과 이모지로만 정리해.\n\n"
+        "🇰🇷 한국어\n(자연스러운 한국어 번역)\n\n"
+        "🇯🇵 일본어\n(자연스러운 일본어 문장)\n"
+        "🗣 발음: (히라가나 읽기)\n"
+        "🔤 로마자: (헵번식 로마자 읽기)\n\n"
+        "📖 한자 풀이\n"
+        "(일본어 문장에 쓰인 칸지마다 한 줄씩) 한자 : 음독·훈독 / 한국 한자음·뜻\n\n"
+        "💡 설명\n(문장의 뜻·뉘앙스·어떤 상황에서 쓰는지 2~3줄로 쉽게)\n\n"
+        "⌨️ 입력 방법\n"
+        "(일본어 문장을 QWERTY 자판에서 로마자로 어떻게 입력하는지. 예: こんにちは → konnichiha)\n\n"
+        f"입력 문장: {text}"
+    )
+    return _stream_prompt_response(prompt)
+
+
 @app.route("/api/ai/lyrics", methods=["POST"])
 def ai_lyrics():
     """일본어 가사를 AI로 분석 (SSE 스트리밍) — 주요 단어·문법·해석."""

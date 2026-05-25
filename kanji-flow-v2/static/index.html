@@ -418,6 +418,25 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       번역
+  ══════════════════════════════════════════ -->
+  <div id="translate-view" class="view">
+    <div class="lyrics-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:4px;">번역</h2>
+      <p style="font-size:13px;color:var(--text-secondary)">한국어·일본어 번역 + 한자·발음·입력법까지</p>
+    </div>
+
+    <textarea class="lyrics-textarea" id="translate-input"
+      placeholder="번역할 문장을 입력하세요 (한국어 / 일본어 / 영어)"></textarea>
+
+    <div class="lyrics-btn-row">
+      <button class="analyze-btn ai" onclick="doTranslate()">🌐 번역하기</button>
+    </div>
+
+    <div class="lyrics-results" id="translate-result"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        설정 화면
   ══════════════════════════════════════════ -->
   <div id="settings-view" class="view">
@@ -631,6 +650,12 @@
       </svg>
       가사
     </button>
+    <button class="nav-btn" id="nav-translate" onclick="showView('translate')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h7M3 5c0 4 2 7 6 9M9 3v2m-1.5 9c1.5-1 3-2.5 3.5-4.5M12 20l4-9 4 9m-7-2h6"/>
+      </svg>
+      번역
+    </button>
     <button class="nav-btn" id="nav-ai" onclick="showView('ai')">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>
@@ -691,9 +716,6 @@
           <div class="overlay-sub">탭하면 열리고, 🗑로 삭제해요</div>
         </div>
         <div class="overlay-close" onclick="closeLyricsList()">✕</div>
-      </div>
-      <div class="lyrics-btn-row" style="margin-bottom:12px">
-        <button class="analyze-btn" onclick="newLyricFromList()">➕ 새 가사 추가</button>
       </div>
       <div id="saved-lyrics-list"></div>
     </div>

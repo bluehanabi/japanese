@@ -79,7 +79,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 마지막으로 보던 탭 복원 (앱을 껐다 켜도 그 탭 유지)
   const lastTab = localStorage.getItem("lastTab");
   if (lastTab && lastTab !== "home" &&
-      ["vocab", "stats", "lyrics", "ai", "settings"].includes(lastTab)) {
+      ["vocab", "stats", "lyrics", "translate", "ai", "settings"].includes(lastTab)) {
     showView(lastTab);
   }
 });
@@ -125,11 +125,6 @@ function newLyric() {
   document.getElementById("lyrics-results").innerHTML = "";
   showLyricsEditor(true);
 }
-function newLyricFromList() {
-  closeLyricsList();
-  newLyric();
-}
-
 function confirmDeleteLyric(id) {
   if (confirm("이 가사를 삭제할까요?")) deleteSavedLyric(id);
 }
@@ -227,7 +222,7 @@ function showView(name) {
   State.currentView = name;
 
   // 메인 탭이면 마지막 탭으로 기억 (앱 재실행/새로고침 시 복원)
-  if (["home", "vocab", "stats", "lyrics", "ai", "settings"].includes(name)) {
+  if (["home", "vocab", "stats", "lyrics", "translate", "ai", "settings"].includes(name)) {
     localStorage.setItem("lastTab", name);
   }
 
@@ -1201,7 +1196,7 @@ async function scoreWriting() {
   btn.disabled = true;
   btn.textContent = "채점 중…";
   const data = await apiFetch("/api/ai/score_writing", "POST",
-    { card_id: card.id, image: w.canvas.exportInk() });
+    { card_id: card.id, image: w.canvas.exportInk(200) });
   btn.disabled = false;
 
   if (data.error) {
@@ -1839,6 +1834,13 @@ async function sendChat() {
   }
   State.chat.busy = false;
   scrollChat();
+}
+
+// ── 번역 ───────────────────────────────────────────────
+function doTranslate() {
+  const text = document.getElementById("translate-input").value.trim();
+  if (!text) { showToast("번역할 문장을 입력해 주세요"); return; }
+  streamInto("/api/ai/translate", { text }, document.getElementById("translate-result"));
 }
 
 // SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)
