@@ -75,20 +75,63 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
   await loadHome();
   await loadSettings();
+
+  // 마지막으로 보던 탭 복원 (앱을 껐다 켜도 그 탭 유지)
+  const lastTab = localStorage.getItem("lastTab");
+  if (lastTab && lastTab !== "home" &&
+      ["vocab", "stats", "lyrics", "ai", "settings"].includes(lastTab)) {
+    showView(lastTab);
+  }
 });
 
-// 저장된 가사 목록 (서버) 불러와 칩으로 표시
+// 저장된 가사 목록 (서버) 불러와 오버레이 리스트로 표시 + 항목 배열 반환
 async function loadSavedLyrics() {
   const wrap = document.getElementById("saved-lyrics-list");
   const data = await apiFetch("/api/lyrics/list");
   const items = data.items || [];
   wrap.innerHTML = items.length
     ? items.map(it => `
-        <span class="saved-chip">
-          <button class="saved-chip-load" onclick="openSavedLyric(${it.id})">📄 ${escapeHtml(it.title)}</button>
-          <button class="saved-chip-del" onclick="deleteSavedLyric(${it.id})">✕</button>
-        </span>`).join("")
-    : `<div style="color:var(--text-muted);font-size:12px;padding:0 20px">저장된 가사가 없어요</div>`;
+        <div class="saved-row">
+          <button class="saved-row-open" onclick="openSavedLyric(${it.id})">📄 ${escapeHtml(it.title)}</button>
+          <button class="saved-row-del" onclick="confirmDeleteLyric(${it.id})">🗑</button>
+        </div>`).join("")
+    : `<div style="color:var(--text-muted);font-size:13px;padding:24px;text-align:center">저장된 가사가 없어요.<br>아래 '새 가사 추가'로 만들어 보세요.</div>`;
+  return items;
+}
+
+// 가사 탭 진입: 마지막에 보던 노래(없으면 가장 최근)를 불러온다
+async function enterLyricsView() {
+  const items = await loadSavedLyrics();
+  if (!items.length) { newLyric(); return; }
+  const lastId = parseInt(localStorage.getItem("lastLyricId") || "0", 10);
+  const target = items.find(it => it.id === lastId) || items[0];
+  openSavedLyric(target.id);
+}
+
+function openLyricsList() {
+  loadSavedLyrics();
+  document.getElementById("lyrics-list-overlay").classList.add("open");
+}
+function closeLyricsList() {
+  document.getElementById("lyrics-list-overlay").classList.remove("open");
+}
+
+// 새 가사 입력 (빈 편집기)
+function newLyric() {
+  State.lyrics.currentId = null;
+  State.lyrics.lastData = null;
+  document.getElementById("lyrics-title").value = "";
+  document.getElementById("lyrics-input").value = "";
+  document.getElementById("lyrics-results").innerHTML = "";
+  showLyricsEditor(true);
+}
+function newLyricFromList() {
+  closeLyricsList();
+  newLyric();
+}
+
+function confirmDeleteLyric(id) {
+  if (confirm("이 가사를 삭제할까요?")) deleteSavedLyric(id);
 }
 
 // 가사 입력/추출 영역(편집기) 표시 토글
@@ -100,6 +143,8 @@ async function openSavedLyric(id) {
   const it = await apiFetch(`/api/lyrics/item/${id}`);
   if (it.error) { showToast("불러오기 실패"); return; }
   State.lyrics.currentId = it.id;
+  localStorage.setItem("lastLyricId", it.id);   // 다음 진입 때 이 노래 복원
+  closeLyricsList();                            // 목록에서 열었으면 닫기
   document.getElementById("lyrics-title").value = it.title || "";
   document.getElementById("lyrics-input").value = it.text || "";
   showLyricsEditor(false);   // 저장된 가사는 연습 모드로
@@ -137,8 +182,8 @@ function editLyric() {
 
 async function deleteSavedLyric(id) {
   await apiFetch(`/api/lyrics/delete/${id}`, "POST", {});
-  if (State.lyrics.currentId === id) State.lyrics.currentId = null;
-  loadSavedLyrics();
+  if (State.lyrics.currentId === id) newLyric();   // 현재 보던 걸 지우면 새 입력으로
+  loadSavedLyrics();   // 목록 갱신 (오버레이 유지)
 }
 
 async function saveLyrics() {
@@ -147,7 +192,7 @@ async function saveLyrics() {
   if (!text) { showToast("가사를 입력해 주세요"); return; }
   const res = await apiFetch("/api/lyrics/save", "POST",
     { id: State.lyrics.currentId || null, title, text, data: State.lyrics.lastData || null });
-  if (res.id) { State.lyrics.currentId = res.id; showToast("💾 저장됐어요"); loadSavedLyrics(); }
+  if (res.id) { State.lyrics.currentId = res.id; localStorage.setItem("lastLyricId", res.id); showToast("💾 저장됐어요"); loadSavedLyrics(); }
 }
 
 function setGreeting() {
@@ -181,11 +226,16 @@ function showView(name) {
 
   State.currentView = name;
 
+  // 메인 탭이면 마지막 탭으로 기억 (앱 재실행/새로고침 시 복원)
+  if (["home", "vocab", "stats", "lyrics", "ai", "settings"].includes(name)) {
+    localStorage.setItem("lastTab", name);
+  }
+
   // 뷰별 데이터 로드
   if (name === "vocab")    loadVocab();
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
-  if (name === "lyrics")   { showLyricsEditor(true); document.getElementById("lyrics-results").innerHTML = ""; loadSavedLyrics(); }
+  if (name === "lyrics")   enterLyricsView();
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
@@ -195,7 +245,7 @@ function showView(name) {
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
 function appBack() {
   // 1) 열린 오버레이부터 닫기
-  for (const id of ["ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
+  for (const id of ["lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
     const el = document.getElementById(id);
     if (el && el.classList.contains("open")) { el.classList.remove("open"); return "handled"; }
   }

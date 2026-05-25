@@ -394,8 +394,11 @@
       <p style="font-size:13px;color:var(--text-secondary)">좋아하는 일본어 노래 가사의 한자를 분석합니다</p>
     </div>
 
-    <!-- 저장된 가사 목록 -->
-    <div class="saved-lyrics" id="saved-lyrics-list"></div>
+    <!-- 목록 보기 / 새 가사 -->
+    <div class="lyrics-btn-row" style="margin-bottom:8px">
+      <button class="analyze-btn" onclick="openLyricsList()">📋 목록 보기</button>
+      <button class="analyze-btn" onclick="newLyric()">➕ 새 가사</button>
+    </div>
 
     <div id="lyrics-editor">
       <input id="lyrics-title" class="ai-key-input" style="margin:0 20px 8px;width:calc(100% - 40px)" placeholder="제목 (예: 요네즈 켄시 - Lemon)"/>
@@ -679,6 +682,25 @@
 
   <!-- ══════════════════════════════════════════
        퀴즈 설정 모달
+  ══════════════════════════════════════════ -->
+  <div id="lyrics-list-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title">📋 저장된 가사</div>
+          <div class="overlay-sub">탭하면 열리고, 🗑로 삭제해요</div>
+        </div>
+        <div class="overlay-close" onclick="closeLyricsList()">✕</div>
+      </div>
+      <div class="lyrics-btn-row" style="margin-bottom:12px">
+        <button class="analyze-btn" onclick="newLyricFromList()">➕ 새 가사 추가</button>
+      </div>
+      <div id="saved-lyrics-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       랜덤 퀴즈 설정
   ══════════════════════════════════════════ -->
   <div id="quiz-setup-overlay" class="overlay">
     <div class="overlay-sheet">
