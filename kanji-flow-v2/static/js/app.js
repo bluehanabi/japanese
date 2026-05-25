@@ -1785,29 +1785,51 @@ async function startListening() {
   const data = await apiFetch("/api/ai/sentences", "POST", {});
   const items = (data.sentences || []).filter(s => s.jp && s.kr);
   if (!items.length) { showToast(data.error || "문장이 아직 없어요. 학습을 한 번 하면 생성돼요."); showView("ai"); return; }
-  State.listen2 = { items, index: 0, correct: 0 };
+  State.listen2 = { items, index: 0, correct: 0, mode: "dictation" };
+  document.getElementById("lmode-dict").classList.add("active");
+  document.getElementById("lmode-choice").classList.remove("active");
+  showListen2();
+}
+function setListenMode(mode) {
+  if (!State.listen2) return;
+  State.listen2.mode = mode;
+  document.getElementById("lmode-dict").classList.toggle("active", mode === "dictation");
+  document.getElementById("lmode-choice").classList.toggle("active", mode === "choice");
   showListen2();
 }
 function showListen2() {
   const S = State.listen2, it = S.items[S.index];
   if (!it) { showListenComplete(); return; }
   document.getElementById("listen-progress").textContent = `${S.index + 1} / ${S.items.length}`;
-  const inp = document.getElementById("listen-input2");
-  inp.value = ""; inp.disabled = false;
-  inp.onkeydown = e => { if (e.key === "Enter") document.getElementById("listen-check2").onclick(); };
-  const btn = document.getElementById("listen-check2");
-  btn.textContent = "확인"; btn.onclick = checkListen2;
   document.getElementById("listen-result2").style.display = "none";
+  document.getElementById("listen-hint-text").textContent = "";
+  const dict = document.getElementById("listen-dict"), choice = document.getElementById("listen-choice");
+  if (S.mode === "choice") {
+    dict.style.display = "none"; choice.style.display = "";
+    const others = S.items.filter((_, i) => i !== S.index).map(x => x.kr);
+    S.opts = shuffleArr([it.kr, ...shuffleArr(others).slice(0, 3)]);
+    choice.innerHTML = S.opts.map((o, i) =>
+      `<button class="quiz-option" onclick="pickListenChoice(${i})">${escapeHtml(o)}</button>`).join("");
+  } else {
+    choice.style.display = "none"; dict.style.display = "";
+    const inp = document.getElementById("listen-input2");
+    inp.value = ""; inp.disabled = false;
+    inp.onkeydown = e => { if (e.key === "Enter") checkListen2(); };
+    const btn = document.getElementById("listen-check2");
+    btn.textContent = "확인"; btn.onclick = checkListen2;
+  }
   listenPlayNow(1);   // 들어오면 한 번 재생
 }
 function listenPlayNow(rate) {
   const S = State.listen2, it = S && S.items[S.index];
   if (it) speakRate(it.jp, rate);
 }
-function checkListen2() {
+function listenHint() {
+  const S = State.listen2, it = S && S.items[S.index];
+  if (it) document.getElementById("listen-hint-text").textContent = "뜻: " + it.kr;
+}
+function revealListen(ok) {
   const S = State.listen2, it = S.items[S.index];
-  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
-  const ok = norm(document.getElementById("listen-input2").value) === norm(it.jp);
   if (ok) S.correct++;
   const r = document.getElementById("listen-result2");
   r.style.display = "block";
@@ -1815,11 +1837,20 @@ function checkListen2() {
   r.innerHTML = `
     <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
     <div class="reveal-front" style="font-size:20px">${escapeHtml(it.jp)}</div>
-    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>`;
+    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>
+    <button class="quiz-next-btn" style="margin-top:10px" onclick="listenAdvance()">${S.index >= S.items.length - 1 ? "결과 보기 →" : "다음 →"}</button>`;
+}
+function listenAdvance() { State.listen2.index++; showListen2(); }
+function checkListen2() {
+  const S = State.listen2, it = S.items[S.index];
+  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
   document.getElementById("listen-input2").disabled = true;
-  const btn = document.getElementById("listen-check2");
-  btn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
-  btn.onclick = () => { S.index++; showListen2(); };
+  revealListen(norm(document.getElementById("listen-input2").value) === norm(it.jp));
+}
+function pickListenChoice(i) {
+  const S = State.listen2, it = S.items[S.index];
+  document.querySelectorAll("#listen-choice .quiz-option").forEach(b => b.classList.add("disabled"));
+  revealListen(S.opts[i] === it.kr);
 }
 function showListenComplete() {
   document.getElementById("listen-body").style.display = "none";
@@ -1843,12 +1874,32 @@ async function apiFetch(path, method = "GET", body = null) {
 
   try {
     const res = await fetch(API + path, opts);
+    if (res.status === 401) { showLogin(); return {}; }   // 비밀번호 게이트
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
     console.error(`API 오류 [${path}]:`, e);
     return {};
   }
+}
+
+// ── 비밀번호 게이트 (서버에 APP_PASSWORD 설정 시) ──
+function showLogin() {
+  const el = document.getElementById("login-overlay");
+  if (el) { el.style.display = "flex"; setTimeout(() => document.getElementById("login-pw").focus(), 60); }
+}
+async function doLogin() {
+  const pw = document.getElementById("login-pw").value;
+  const err = document.getElementById("login-error");
+  err.textContent = "";
+  try {
+    const res = await fetch(API + "/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (res.ok) { document.getElementById("login-overlay").style.display = "none"; location.reload(); }
+    else { err.textContent = "비밀번호가 틀렸어요."; }
+  } catch (e) { err.textContent = "연결 오류"; }
 }
 
 // ── TTS 발음 (가나 기반으로 정확하게) ──────────────────

@@ -17,6 +17,36 @@ from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_inte
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
+# ── 선택적 비밀번호 게이트 (환경변수 APP_PASSWORD 설정 시 활성) ──
+import hashlib
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+_AUTH_TOKEN = hashlib.sha256(("kanjiflow:" + APP_PASSWORD).encode()).hexdigest() if APP_PASSWORD else ""
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    if not APP_PASSWORD:
+        return jsonify({"ok": True})   # 게이트 비활성
+    pw = (request.get_json() or {}).get("password", "")
+    if pw == APP_PASSWORD:
+        resp = jsonify({"ok": True})
+        resp.set_cookie("kf_auth", _AUTH_TOKEN, max_age=60 * 60 * 24 * 180,
+                        httponly=True, samesite="Lax")
+        return resp
+    return jsonify({"error": "비밀번호가 틀렸어요."}), 403
+
+
+@app.before_request
+def _auth_gate():
+    if not APP_PASSWORD:
+        return                          # 게이트 비활성 → 통과
+    p = request.path
+    if not p.startswith("/api/") or p == "/api/login":
+        return                          # 정적 파일/로그인은 공개
+    if request.cookies.get("kf_auth") == _AUTH_TOKEN:
+        return                          # 인증됨
+    return jsonify({"error": "auth_required"}), 401
+
 
 @app.after_request
 def no_cache_assets(resp):
