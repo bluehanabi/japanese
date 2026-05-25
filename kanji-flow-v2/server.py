@@ -603,6 +603,56 @@ def build_quiz():
 #  API: 가사 분석
 # ══════════════════════════════════════════════════════════
 
+@app.route("/api/lyrics/save", methods=["POST"])
+def save_lyrics():
+    """추출한 가사를 제목과 함께 서버에 저장 (id 주면 갱신)."""
+    d = request.get_json() or {}
+    title = (d.get("title") or "제목 없음").strip()[:80]
+    text = (d.get("text") or "").strip()
+    data = json.dumps(d.get("data"), ensure_ascii=False) if d.get("data") is not None else None
+    conn = get_db()
+    if d.get("id"):
+        conn.execute("UPDATE saved_lyrics SET title=?, text=?, data=? WHERE id=?",
+                     (title, text, data, d["id"]))
+        sid = d["id"]
+    else:
+        cur = conn.execute("INSERT INTO saved_lyrics (title, text, data, created_at) VALUES (?,?,?,?)",
+                           (title, text, data, date.today().isoformat()))
+        sid = cur.lastrowid
+    conn.commit(); conn.close()
+    return jsonify({"id": sid})
+
+
+@app.route("/api/lyrics/list")
+def list_lyrics():
+    conn = get_db()
+    rows = conn.execute("SELECT id, title, created_at FROM saved_lyrics ORDER BY id DESC").fetchall()
+    conn.close()
+    return jsonify({"items": [dict(r) for r in rows]})
+
+
+@app.route("/api/lyrics/item/<int:sid>")
+def get_lyrics_item(sid):
+    conn = get_db()
+    r = conn.execute("SELECT id, title, text, data FROM saved_lyrics WHERE id=?", (sid,)).fetchone()
+    conn.close()
+    if not r:
+        return jsonify({"error": "없는 항목"}), 404
+    d = dict(r)
+    if d.get("data"):
+        try: d["data"] = json.loads(d["data"])
+        except: d["data"] = None
+    return jsonify(d)
+
+
+@app.route("/api/lyrics/delete/<int:sid>", methods=["POST"])
+def delete_lyrics(sid):
+    conn = get_db()
+    conn.execute("DELETE FROM saved_lyrics WHERE id=?", (sid,))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/lyrics/analyze", methods=["POST"])
 def analyze_lyrics():
     """가사 텍스트에서 한자 추출 및 DB 매핑"""
@@ -981,21 +1031,24 @@ def ai_lyrics():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-def _generate_sentences_raw(api_key, model, n=6):
-    """Gemini로 문장 연습 문제 n개 생성 (학습 범위 단어 활용). 깨끗한 리스트 반환."""
+def _generate_sentences_raw(api_key, model, n=6, given_words=None):
+    """Gemini로 문장 연습 문제 n개 생성. given_words 가 있으면 그 단어들로, 없으면 학습 범위 단어로."""
     levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] or ["N5"]
     order = {"N5": 5, "N4": 4, "N3": 3, "N2": 2, "N1": 1}
     easiest = min(levels, key=lambda x: order.get(x, 5))
-    cond, params = _level_scope()
-    conn = get_db()
-    rows = conn.execute(f"""
-        SELECT c.front, c.back_meaning FROM cards c JOIN reviews r ON r.card_id = c.id
-        WHERE c.type = 'word' AND {cond}
-        ORDER BY (r.repetitions > 0) DESC, RANDOM() LIMIT 8
-    """, params).fetchall()
-    conn.close()
-    words = [f"{r['front']}({r['back_meaning']})" for r in rows]
-    words_str = ", ".join(words) if words else "기본 N5 단어"
+    if given_words:
+        words_str = ", ".join(given_words[:12])
+    else:
+        cond, params = _level_scope()
+        conn = get_db()
+        rows = conn.execute(f"""
+            SELECT c.front, c.back_meaning FROM cards c JOIN reviews r ON r.card_id = c.id
+            WHERE c.type = 'word' AND {cond}
+            ORDER BY (r.repetitions > 0) DESC, RANDOM() LIMIT 8
+        """, params).fetchall()
+        conn.close()
+        words = [f"{r['front']}({r['back_meaning']})" for r in rows]
+        words_str = ", ".join(words) if words else "기본 N5 단어"
     prompt = (
         f"너는 일본어 교사야. JLPT {easiest} 수준의 한국인 학습자를 위해 짧고 자연스러운 "
         f"일본어 예문 {n}개를 만들어줘. 가능하면 다음 단어들을 활용해: {words_str}.\n"
@@ -1042,7 +1095,21 @@ def _pregen_sentences_job():
 
 @app.route("/api/ai/sentences", methods=["POST"])
 def ai_sentences():
-    """문장 연습 — 캐시에서 즉시 제공, 부족하면 동기 생성. 캐시는 백그라운드로 보충."""
+    """문장 연습 — 캐시에서 즉시 제공, 부족하면 동기 생성. words 지정 시 그 단어들로 즉석 생성."""
+    given = (request.get_json() or {}).get("words")
+    if given:
+        api_key = get_setting("gemini_api_key", "")
+        if not api_key:
+            return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+        model = get_setting("gemini_model", "gemini-3.5-flash")
+        try:
+            items = _generate_sentences_raw(api_key, model, 6, given_words=given)
+            if not items:
+                return jsonify({"error": "문장 생성 결과가 비어 있어요."}), 502
+            return jsonify({"sentences": items})
+        except Exception as e:
+            return jsonify({"error": f"문장 생성 실패: {e}"}), 502
+
     conn = get_db()
     rows = conn.execute(
         "SELECT jp, jp_tiles, kr, kr_tiles FROM sentence_cache ORDER BY RANDOM() LIMIT 5").fetchall()

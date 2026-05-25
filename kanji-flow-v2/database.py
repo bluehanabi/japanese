@@ -96,6 +96,17 @@ def _create_schema(cur):
         )
     """)
 
+    # 저장한 가사 (제목 + 원문 + 추출 결과)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS saved_lyrics (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            title      TEXT NOT NULL,
+            text       TEXT NOT NULL,
+            data       TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
 
 def init_db():
     """스키마 생성 + (데이터 버전이 바뀌었으면) 카드 재생성."""

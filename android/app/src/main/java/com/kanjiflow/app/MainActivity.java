@@ -2,10 +2,13 @@ package com.kanjiflow.app;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
@@ -16,10 +19,28 @@ public class MainActivity extends Activity {
     private WebView web;
     private boolean triedFallback = false;
     private long pausedAt = 0;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+
+    // JS 에서 호출하는 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
+    public class TTSBridge {
+        @JavascriptInterface
+        public void speak(final String text) {
+            if (!ttsReady || text == null || text.isEmpty()) return;
+            runOnUiThread(() -> tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "kf"));
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        tts = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                tts.setLanguage(Locale.JAPANESE);
+                ttsReady = true;
+            }
+        });
 
         web = new WebView(this);
         WebSettings ws = web.getSettings();
@@ -29,6 +50,7 @@ public class MainActivity extends Activity {
         ws.setMediaPlaybackRequiresUserGesture(false);
         // 항상 서버에서 최신본을 불러오도록 캐시 사용 안 함 (업데이트 반영)
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        web.addJavascriptInterface(new TTSBridge(), "AndroidTTS");
 
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
@@ -82,5 +104,11 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         web.saveState(outState);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tts != null) { tts.stop(); tts.shutdown(); }
+        super.onDestroy();
     }
 }

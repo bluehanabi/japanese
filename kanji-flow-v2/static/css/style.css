@@ -1961,3 +1961,23 @@ html, body {
   cursor: pointer;
 }
 #ai-chat-view { padding: 0; overflow: hidden; }
+
+/* ── 저장된 가사 칩 ──────────────────────────────────── */
+.saved-lyrics { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
+.saved-chip {
+  display: inline-flex; align-items: center;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px;
+  overflow: hidden;
+}
+.saved-chip-load {
+  background: none; border: none; color: var(--text-primary);
+  font-family: var(--font-kr); font-size: 12px; font-weight: 600;
+  padding: 7px 4px 7px 12px; cursor: pointer; max-width: 200px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.saved-chip-del {
+  background: none; border: none; color: var(--text-muted);
+  padding: 7px 10px 7px 6px; cursor: pointer; font-size: 12px;
+}
+.lyrics-actions-grid { flex-wrap: wrap; }
+.lyrics-actions-grid .action-btn { flex: 1 1 calc(50% - 5px); }

@@ -46,7 +46,7 @@ const State = {
     count: 15,
   },
   lyrics: {
-    foundIds: [],
+    foundIds: [], foundCards: [], lastData: null, currentId: null,
   },
   sentence: {
     items: [], index: 0, direction: "jp2kr",
@@ -76,6 +76,45 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadHome();
   await loadSettings();
 });
+
+// 저장된 가사 목록 (서버) 불러와 칩으로 표시
+async function loadSavedLyrics() {
+  const wrap = document.getElementById("saved-lyrics-list");
+  const data = await apiFetch("/api/lyrics/list");
+  const items = data.items || [];
+  wrap.innerHTML = items.length
+    ? items.map(it => `
+        <span class="saved-chip">
+          <button class="saved-chip-load" onclick="openSavedLyric(${it.id})">📄 ${escapeHtml(it.title)}</button>
+          <button class="saved-chip-del" onclick="deleteSavedLyric(${it.id})">✕</button>
+        </span>`).join("")
+    : `<div style="color:var(--text-muted);font-size:12px;padding:0 20px">저장된 가사가 없어요</div>`;
+}
+
+async function openSavedLyric(id) {
+  const it = await apiFetch(`/api/lyrics/item/${id}`);
+  if (it.error) { showToast("불러오기 실패"); return; }
+  State.lyrics.currentId = it.id;
+  document.getElementById("lyrics-title").value = it.title || "";
+  document.getElementById("lyrics-input").value = it.text || "";
+  if (it.data) { State.lyrics.lastData = it.data; renderLyricsResults(it.data); }
+  else document.getElementById("lyrics-results").innerHTML = "";
+}
+
+async function deleteSavedLyric(id) {
+  await apiFetch(`/api/lyrics/delete/${id}`, "POST", {});
+  if (State.lyrics.currentId === id) State.lyrics.currentId = null;
+  loadSavedLyrics();
+}
+
+async function saveLyrics() {
+  const title = document.getElementById("lyrics-title").value.trim() || "제목 없음";
+  const text = document.getElementById("lyrics-input").value.trim();
+  if (!text) { showToast("가사를 입력해 주세요"); return; }
+  const res = await apiFetch("/api/lyrics/save", "POST",
+    { id: State.lyrics.currentId || null, title, text, data: State.lyrics.lastData || null });
+  if (res.id) { State.lyrics.currentId = res.id; showToast("💾 저장됐어요"); loadSavedLyrics(); }
+}
 
 function setGreeting() {
   const h = new Date().getHours();
@@ -112,6 +151,7 @@ function showView(name) {
   if (name === "vocab")    loadVocab();
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
+  if (name === "lyrics")   loadSavedLyrics();
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
@@ -194,13 +234,16 @@ async function loadHome() {
 // ══════════════════════════════════════════════════════════
 
 async function startStudy(extra = false) {
-  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
-  const review_cards = data.review_cards || [];
-  const new_cards = data.new_cards || [];
-  const queue = [...review_cards, ...new_cards];
-
+  let data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  // 오늘치를 끝냈으면 자동으로 추가 학습으로 전환
+  if (queue.length === 0 && !extra) {
+    extra = true;
+    data = await apiFetch("/api/today?extra=1") || {};
+    queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  }
   if (queue.length === 0) {
-    showToast(extra ? "더 학습할 카드가 없어요 🎉" : "오늘 학습할 카드가 없어요");
+    showToast("더 학습할 카드가 없어요 🎉");
     return;
   }
 
@@ -224,10 +267,15 @@ async function startStudy(extra = false) {
 
 // 통합 학습 — 카드마다 플래시카드/사지선다를 자동으로 섞어 연속 출제
 async function startUnified(extra = false) {
-  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
-  const queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  let data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  if (queue.length === 0 && !extra) {
+    extra = true;
+    data = await apiFetch("/api/today?extra=1") || {};
+    queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  }
   if (queue.length === 0) {
-    showToast(extra ? "더 학습할 카드가 없어요 🎉" : "오늘 학습할 카드가 없어요");
+    showToast("더 학습할 카드가 없어요 🎉");
     return;
   }
   showView("study");
@@ -637,8 +685,9 @@ function openCardDetail(id) {
 async function loadStats() {
   const stats = await apiFetch("/api/stats");
 
-  document.getElementById("s-total").textContent     = stats.total_cards;
-  document.getElementById("s-mastered").textContent  = stats.mastered;
+  // 선택한 범위 기준 (총 카드 절대값은 설정 화면에만 표시)
+  document.getElementById("s-total").textContent     = stats.scope_total ?? stats.total_cards;
+  document.getElementById("s-mastered").textContent  = stats.scope_mastered ?? stats.mastered;
   document.getElementById("s-today-done").textContent = stats.today_reviewed;
   document.getElementById("s-accuracy").textContent  = stats.today_accuracy + "%";
 
@@ -705,14 +754,13 @@ async function analyzeLyrics() {
     showToast("가사를 입력해 주세요!");
     return;
   }
-
   const resultsEl = document.getElementById("lyrics-results");
   resultsEl.innerHTML = '<div class="spinner"></div>';
 
   const data = await apiFetch("/api/lyrics/analyze", "POST", { text });
 
   if (!data.found) {
-    State.lyrics.foundIds = [];
+    State.lyrics.foundIds = []; State.lyrics.foundCards = []; State.lyrics.lastData = null;
     resultsEl.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
@@ -721,25 +769,62 @@ async function analyzeLyrics() {
       </div>`;
     return;
   }
+  State.lyrics.lastData = data;
+  renderLyricsResults(data);
+}
 
-  // 가사 퀴즈 / 쓰기 연습에 쓸 카드 보관
+function renderLyricsResults(data) {
   State.lyrics.foundIds = data.kanji.map(k => k.id);
   State.lyrics.foundCards = data.kanji;
-
-  resultsEl.innerHTML = `
+  document.getElementById("lyrics-results").innerHTML = `
     <div class="result-summary">가사에서 <b style="color:var(--indigo)">${data.found}개</b>의 한자를 찾았어요!</div>
-    <div class="lyrics-actions">
-      <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>이 한자로 퀴즈</span></button>
+    <div class="lyrics-actions lyrics-actions-grid">
+      <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>퀴즈</span></button>
+      <button class="action-btn" onclick="startLyricsCards()"><span class="action-emoji">🃏</span><span>카드 학습</span></button>
+      <button class="action-btn" onclick="startLyricsSentences()"><span class="action-emoji">🧩</span><span>문장 연습</span></button>
       <button class="action-btn" onclick="openWriting(State.lyrics.foundCards, 0)"><span class="action-emoji">✍️</span><span>쓰기 연습</span></button>
     </div>
     <div class="result-kanji-grid">
       ${data.kanji.map((k, i) => `
         <div class="result-kanji-card" onclick="openWriting(State.lyrics.foundCards, ${i})">
-          <div class="result-kanji-char">${k.front}</div>
-          <div class="result-kanji-meaning">${k.back_meaning}</div>
+          <div class="result-kanji-char">${escapeHtml(k.front)}</div>
+          <div class="result-kanji-meaning">${escapeHtml(k.back_meaning)}</div>
           <div class="result-kanji-state ${k.state}"></div>
         </div>`).join("")}
     </div>`;
+}
+
+// 가사 한자로 카드(플래시) 학습
+function studyCards(cards) {
+  if (!cards || !cards.length) { showToast("카드가 없어요"); return; }
+  showView("study");
+  document.getElementById("study-complete").style.display = "none";
+  State.study.queue = cards;
+  State.study.unified = false;
+  State.study.extra = false;
+  State.study.index = 0;
+  State.study.sessionCorrect = 0;
+  State.study.sessionTotal = 0;
+  State.study.hardFronts = [];
+  showCard(0);
+}
+function startLyricsCards() { studyCards(State.lyrics.foundCards || []); }
+
+// 가사 한자로 문장 연습 (그 글자들로 문장 생성)
+async function startLyricsSentences() {
+  const words = (State.lyrics.foundCards || []).map(c => c.front);
+  if (!words.length) { showToast("먼저 가사를 분석해 주세요"); return; }
+  showToast("문장 만드는 중…");
+  const data = await apiFetch("/api/ai/sentences", "POST", { words });
+  const items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  if (!items.length) { showToast(data.error || "문장을 만들지 못했어요"); return; }
+  State.sentence.items = items;
+  State.sentence.index = 0;
+  State.sentence.correct = 0;
+  showView("sentence");
+  document.getElementById("sent-complete").style.display = "none";
+  document.getElementById("sent-body").style.display = "flex";
+  showSentence(0);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -801,9 +886,9 @@ async function loadSettingsUI() {
   const keyInput = document.getElementById("setting-gemini-key");
   if (keyInput) keyInput.value = s.gemini_api_key || "";
 
-  // 총 카드
-  document.getElementById("info-total-cards").textContent =
-    document.getElementById("s-total")?.textContent || "—";
+  // 총 카드(절대값)은 /api/stats 에서
+  const st = await apiFetch("/api/stats");
+  document.getElementById("info-total-cards").textContent = st.total_cards ?? "—";
 }
 
 function changeNewCards(delta) {
@@ -1389,7 +1474,12 @@ async function apiFetch(path, method = "GET", body = null) {
 
 // ── TTS 발음 (가나 기반으로 정확하게) ──────────────────
 function speak(text) {
-  if (!text || !("speechSynthesis" in window)) return;
+  if (!text) return;
+  // APK: 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
+  if (window.AndroidTTS && window.AndroidTTS.speak) {
+    try { window.AndroidTTS.speak(text); return; } catch (e) {}
+  }
+  if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ja-JP";
