@@ -15,6 +15,9 @@ venv/
 # 자동 백업 (런타임 생성)
 backups/
 
+# 비밀번호 게이트 (서버에만 두는 비밀)
+.app_password
+
 # Android 빌드 산출물
 kanji-app/build/
 kanji-app/app/build/

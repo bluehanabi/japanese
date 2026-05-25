@@ -7,6 +7,11 @@ cd "$(dirname "$0")"
 
 PORT=8005
 
+# 비밀번호 게이트: .app_password 파일이 있으면 자동 적용 (깃에 안 올라감, launchd/수동 모두 동작)
+if [ -z "$APP_PASSWORD" ] && [ -f .app_password ]; then
+  export APP_PASSWORD="$(tr -d '\r\n' < .app_password)"
+fi
+
 # python3 찾기 — macOS 비대화식 SSH 세션은 Homebrew 경로가 PATH에 없을 수 있음
 PYTHON="${PYTHON:-}"
 if [ -z "$PYTHON" ]; then
