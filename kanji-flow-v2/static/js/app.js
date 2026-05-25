@@ -91,14 +91,34 @@ async function loadSavedLyrics() {
     : `<div style="color:var(--text-muted);font-size:12px;padding:0 20px">저장된 가사가 없어요</div>`;
 }
 
+// 가사 입력/추출 영역(편집기) 표시 토글
+function showLyricsEditor(show) {
+  document.getElementById("lyrics-editor").style.display = show ? "" : "none";
+}
+
 async function openSavedLyric(id) {
   const it = await apiFetch(`/api/lyrics/item/${id}`);
   if (it.error) { showToast("불러오기 실패"); return; }
   State.lyrics.currentId = it.id;
   document.getElementById("lyrics-title").value = it.title || "";
   document.getElementById("lyrics-input").value = it.text || "";
-  if (it.data) { State.lyrics.lastData = it.data; renderLyricsResults(it.data); }
-  else document.getElementById("lyrics-results").innerHTML = "";
+  if (it.data) {
+    // 이미 추출된 가사 → 편집기 숨기고 바로 연습 버튼(수정 포함)만 보여준다
+    State.lyrics.lastData = it.data;
+    showLyricsEditor(false);
+    renderLyricsResults(it.data);
+  } else {
+    // 추출 결과가 없으면 편집기에서 추출하도록
+    showLyricsEditor(true);
+    document.getElementById("lyrics-results").innerHTML = "";
+  }
+}
+
+// 저장된 가사 보기에서 '수정' → 편집기를 다시 펼친다 (연습 버튼은 유지)
+function editLyric() {
+  showLyricsEditor(true);
+  if (State.lyrics.lastData) renderLyricsResults(State.lyrics.lastData);
+  document.getElementById("lyrics-input").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function deleteSavedLyric(id) {
@@ -151,7 +171,7 @@ function showView(name) {
   if (name === "vocab")    loadVocab();
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
-  if (name === "lyrics")   loadSavedLyrics();
+  if (name === "lyrics")   { showLyricsEditor(true); document.getElementById("lyrics-results").innerHTML = ""; loadSavedLyrics(); }
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
@@ -776,7 +796,11 @@ async function analyzeLyrics() {
 function renderLyricsResults(data) {
   State.lyrics.foundIds = data.kanji.map(k => k.id);
   State.lyrics.foundCards = data.kanji;
-  document.getElementById("lyrics-results").innerHTML = `
+  // 편집기가 숨겨진(저장된 가사 보기) 상태면 '수정' 버튼을 위에 보여준다
+  const editorHidden = document.getElementById("lyrics-editor").style.display === "none";
+  const editBtn = editorHidden
+    ? `<button class="analyze-btn" style="margin:0 20px 12px;width:calc(100% - 40px)" onclick="editLyric()">✏️ 수정</button>` : "";
+  document.getElementById("lyrics-results").innerHTML = editBtn + `
     <div class="result-summary">가사에서 <b style="color:var(--indigo)">${data.found}개</b>의 한자를 찾았어요!</div>
     <div class="lyrics-actions lyrics-actions-grid">
       <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>퀴즈</span></button>
@@ -1415,6 +1439,10 @@ function checkSentence() {
   const S = State.sentence;
   if (S.answered) return;
   S.answered = true;
+
+  // 한 문제 풀 때마다 백그라운드로 문장 캐시 보충 → 다음 문장이 항상 미리 준비됨
+  apiFetch("/api/ai/pregenerate", "POST", {});
+
   const isCorrect = S.answer.join("") === S.target.join("");
   if (isCorrect) S.correct++;
 

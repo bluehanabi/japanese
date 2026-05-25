@@ -397,16 +397,18 @@
     <!-- 저장된 가사 목록 -->
     <div class="saved-lyrics" id="saved-lyrics-list"></div>
 
-    <input id="lyrics-title" class="ai-key-input" style="margin:0 20px 8px;width:calc(100% - 40px)" placeholder="제목 (예: 요네즈 켄시 - Lemon)"/>
-    <textarea class="lyrics-textarea" id="lyrics-input"
-      placeholder="여기에 일본어 가사를 붙여넣으세요...&#10;예) 夜が明けるまで 君と歌いたい"></textarea>
+    <div id="lyrics-editor">
+      <input id="lyrics-title" class="ai-key-input" style="margin:0 20px 8px;width:calc(100% - 40px)" placeholder="제목 (예: 요네즈 켄시 - Lemon)"/>
+      <textarea class="lyrics-textarea" id="lyrics-input"
+        placeholder="여기에 일본어 가사를 붙여넣으세요...&#10;예) 夜が明けるまで 君と歌いたい"></textarea>
 
-    <div class="lyrics-btn-row">
-      <button class="analyze-btn" onclick="analyzeLyrics()">📋 한자 추출</button>
-      <button class="analyze-btn ai" onclick="aiLyrics()">🤖 AI 분석</button>
-    </div>
-    <div class="lyrics-btn-row" style="margin-top:8px">
-      <button class="analyze-btn" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.35)" onclick="saveLyrics()">💾 저장</button>
+      <div class="lyrics-btn-row">
+        <button class="analyze-btn" onclick="analyzeLyrics()">📋 한자 추출</button>
+        <button class="analyze-btn ai" onclick="aiLyrics()">🤖 AI 분석</button>
+      </div>
+      <div class="lyrics-btn-row" style="margin-top:8px">
+        <button class="analyze-btn" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.35)" onclick="saveLyrics()">💾 저장</button>
+      </div>
     </div>
 
     <div class="lyrics-results" id="lyrics-results"></div>
