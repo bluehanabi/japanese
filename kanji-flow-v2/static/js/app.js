@@ -102,16 +102,30 @@ async function openSavedLyric(id) {
   State.lyrics.currentId = it.id;
   document.getElementById("lyrics-title").value = it.title || "";
   document.getElementById("lyrics-input").value = it.text || "";
-  if (it.data) {
-    // 이미 추출된 가사 → 편집기 숨기고 바로 연습 버튼(수정 포함)만 보여준다
+  showLyricsEditor(false);   // 저장된 가사는 연습 모드로
+  const results = document.getElementById("lyrics-results");
+
+  // 이미 추출된 데이터가 있으면 바로 연습 버튼
+  if (it.data && it.data.found) {
     State.lyrics.lastData = it.data;
-    showLyricsEditor(false);
     renderLyricsResults(it.data);
-  } else {
-    // 추출 결과가 없으면 편집기에서 추출하도록
-    showLyricsEditor(true);
-    document.getElementById("lyrics-results").innerHTML = "";
+    return;
   }
+  // 추출 데이터가 없으면 저장된 가사로 즉시 자동 추출
+  if (it.text) {
+    results.innerHTML = '<div class="spinner"></div>';
+    const data = await apiFetch("/api/lyrics/analyze", "POST", { text: it.text });
+    if (data && data.found) {
+      State.lyrics.lastData = data;
+      renderLyricsResults(data);
+      // 결과를 저장본에 백필 → 다음부턴 즉시 표시
+      apiFetch("/api/lyrics/save", "POST", { id: it.id, title: it.title || "제목 없음", text: it.text, data });
+      return;
+    }
+  }
+  // 추출 결과가 없으면 편집기에서 직접
+  showLyricsEditor(true);
+  results.innerHTML = "";
 }
 
 // 저장된 가사 보기에서 '수정' → 편집기를 다시 펼친다 (연습 버튼은 유지)
