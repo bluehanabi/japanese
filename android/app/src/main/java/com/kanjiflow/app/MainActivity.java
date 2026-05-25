@@ -2,7 +2,6 @@ package com.kanjiflow.app;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.view.KeyEvent;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -53,12 +52,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && web.canGoBack()) {
-            web.goBack();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
+    public void onBackPressed() {
+        // 뒤로(제스처/버튼)를 WebView 앱 내비게이션으로 전달.
+        // 오버레이 닫기/홈 이동은 JS가 처리, 홈에서 누르면 'exit' → 앱을 백그라운드로(종료 X)
+        if (web == null) { super.onBackPressed(); return; }
+        web.evaluateJavascript("(window.appBack ? appBack() : 'exit')", value -> {
+            if (value == null || value.contains("exit")) {
+                moveTaskToBack(true);
+            }
+        });
     }
 
     @Override

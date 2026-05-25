@@ -389,8 +389,9 @@ html, body {
 /* 플래시카드 */
 .flashcard-scene {
   perspective: 1000px;
-  margin: 0 20px;
-  height: 340px;
+  margin: 8px 20px;
+  flex: 1;
+  min-height: 260px;
   cursor: pointer;
 }
 
@@ -428,7 +429,10 @@ html, body {
   transform: rotateY(180deg);
   justify-content: flex-start;
   padding-top: 28px;
+  overflow-y: auto;          /* 긴 뜻/예시는 카드 안에서 스크롤 */
+  -webkit-overflow-scrolling: touch;
 }
+.card-back::-webkit-scrollbar { width: 0; }
 
 /* 카드 앞면 */
 .card-type-badge {

@@ -116,6 +116,23 @@ function showView(name) {
     (name === "study" || name === "quiz" || name === "sentence") ? "none" : "flex";
 }
 
+// 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
+function appBack() {
+  // 1) 열린 오버레이부터 닫기
+  for (const id of ["ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains("open")) { el.classList.remove("open"); return "handled"; }
+  }
+  // 2) 홈이 아니면 홈으로
+  if (State.currentView && State.currentView !== "home") {
+    showView("home");
+    loadHome();
+    return "handled";
+  }
+  return "exit";   // 홈이면 앱을 백그라운드로
+}
+window.appBack = appBack;
+
 // ══════════════════════════════════════════════════════════
 //  홈 대시보드
 // ══════════════════════════════════════════════════════════
