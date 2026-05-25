@@ -802,6 +802,71 @@ def ai_explain():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _gemini_stream_chat(contents, system, api_key, model):
+    """대화(contents 배열) + 시스템 지시 → 스트리밍 텍스트 조각 yield."""
+    import urllib.request
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{model}:streamGenerateContent?alt=sse&key={api_key}")
+    payload = {"contents": contents,
+               "systemInstruction": {"parts": [{"text": system}]}}
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    resp = urllib.request.urlopen(req, timeout=60)
+    for raw in resp:
+        line = raw.decode("utf-8", "ignore").strip()
+        if not line.startswith("data:"):
+            continue
+        payload2 = line[5:].strip()
+        if not payload2:
+            continue
+        try:
+            d = json.loads(payload2)
+            t = d["candidates"][0]["content"]["parts"][0]["text"]
+            if t:
+                yield t
+        except Exception:
+            continue
+
+
+@app.route("/api/ai/chat", methods=["POST"])
+def ai_chat():
+    """AI 회화 — 대화 이력 기반 일본어 튜터 응답 (SSE)."""
+    data = request.get_json() or {}
+    history = (data.get("history") or [])[-20:]
+    api_key = get_setting("gemini_api_key", "")
+    if not api_key:
+        return jsonify({"error": "Gemini API 키가 없어요. 설정 → AI에서 키를 입력해 주세요."}), 400
+    model = get_setting("gemini_model", "gemini-3.5-flash")
+    levels = [l.strip() for l in get_setting("active_levels", "N5,N4").split(",") if l.strip()] or ["N5"]
+    order = {"N5": 5, "N4": 4, "N3": 3, "N2": 2, "N1": 1}
+    lv = min(levels, key=lambda x: order.get(x, 5))
+    system = (
+        f"너는 친절한 일본어 회화 선생님이야. 학습자는 JLPT {lv} 수준의 한국인.\n"
+        "쉬운 일본어로 짧게(1~2문장) 대화를 이어가. 매 답변은 이 형식:\n"
+        "일본어 문장 (간단한 후리가나) + 줄바꿈 + 한국어 번역.\n"
+        "학습자가 일본어로 쓴 게 틀렸으면, 마지막에 '✏️ ...' 한 줄로 부드럽게 교정해줘. "
+        "마크다운 기호는 쓰지 마."
+    )
+    contents = [{"role": ("user" if m.get("role") == "user" else "model"),
+                 "parts": [{"text": m.get("text", "")}]} for m in history if m.get("text")]
+
+    @stream_with_context
+    def generate():
+        try:
+            for chunk in _gemini_stream_chat(contents, system, api_key, model):
+                yield _sse({"t": chunk})
+        except Exception as e:
+            import urllib.error
+            msg = (f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"
+                   if isinstance(e, urllib.error.HTTPError) else f"AI 호출 실패: {e}")
+            yield _sse({"error": msg})
+            return
+        yield _sse({"done": True})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 def _stream_prompt_response(prompt):
     """프롬프트 → Gemini 스트리밍 SSE Response (공통)."""
     api_key = get_setting("gemini_api_key", "")

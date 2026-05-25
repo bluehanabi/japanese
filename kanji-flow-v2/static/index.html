@@ -558,6 +558,24 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════
+       AI 회화 (채팅)
+  ══════════════════════════════════════════ -->
+  <div id="ai-chat-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-grammar">💬 AI 회화</div>
+      <div style="flex:1"></div>
+      <div class="study-close" onclick="showView('ai')">✕</div>
+    </div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-inputbar">
+      <input id="chat-input" class="chat-input" autocomplete="off"
+             placeholder="일본어로 말 걸어보세요"
+             onkeydown="if(event.key==='Enter')sendChat()"/>
+      <button class="chat-send" onclick="sendChat()">전송</button>
+    </div>
+  </div>
+
   <!-- AI 도구 오버레이 (작문/약점 등) -->
   <div id="ai-tool-overlay" class="overlay">
     <div class="overlay-sheet">

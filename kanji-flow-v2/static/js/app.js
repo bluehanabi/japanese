@@ -52,6 +52,8 @@ const State = {
     items: [], index: 0, direction: "jp2kr",
     target: [], answer: [], bank: [], answered: false, correct: 0,
   },
+  listen: { items: [], idx: 0 },
+  chat: { history: [], busy: false },
   settings: {
     daily_new_cards: 10,
     study_mode: "both",
@@ -113,7 +115,7 @@ function showView(name) {
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (name === "study" || name === "quiz" || name === "sentence") ? "none" : "flex";
+    (name === "study" || name === "quiz" || name === "sentence" || name === "ai-chat") ? "none" : "flex";
 }
 
 // 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
@@ -1483,7 +1485,7 @@ function closeAI() {
 }
 
 // ── AI 허브 도구 (작문 첨삭 / 약점 리포트 / …) ───────────
-function openAITool(kind) {
+async function openAITool(kind) {
   const ov = document.getElementById("ai-tool-overlay");
   const form = document.getElementById("ai-tool-form");
   const body = document.getElementById("ai-tool-body");
@@ -1503,9 +1505,50 @@ function openAITool(kind) {
       <textarea id="ai-correct-text" class="lyrics-textarea" style="min-height:90px;margin:0" placeholder="여기에 일본어 문장을 쓰세요"></textarea>
       <button class="save-btn" style="margin-top:8px" onclick="submitCorrect()">✏️ 첨삭받기</button>`;
     ov.classList.add("open");
+  } else if (kind === "listen") {
+    document.getElementById("ai-tool-title").textContent = "🎧 듣기 받아쓰기";
+    document.getElementById("ai-tool-sub").textContent = "문장을 듣고 받아써 보세요";
+    ov.classList.add("open");
+    body.innerHTML = '<div class="spinner"></div>';
+    const data = await apiFetch("/api/ai/sentences", "POST", {});
+    State.listen.items = (data.sentences || []).filter(s => s.jp);
+    State.listen.idx = 0;
+    if (!State.listen.items.length) {
+      body.innerHTML = '<div class="ai-error">문장이 아직 없어요. 학습을 한 번 하면 자동 생성돼요.</div>';
+      return;
+    }
+    renderListen();
   } else {
-    showToast("곧 추가됩니다 🙂");
+    openChat();
   }
+}
+
+function renderListen() {
+  const body = document.getElementById("ai-tool-body");
+  body.innerHTML = `
+    <button class="tts-btn" style="margin:0 auto 12px;display:block" onclick="listenPlay()">🔊 다시 듣기</button>
+    <textarea id="listen-input" class="lyrics-textarea" style="min-height:70px;margin:0" placeholder="들은 문장을 입력하세요"></textarea>
+    <button class="save-btn" style="margin-top:8px" onclick="checkListen()">확인</button>
+    <div id="listen-result"></div>`;
+  listenPlay();
+}
+function listenPlay() { speak(State.listen.items[State.listen.idx].jp); }
+function checkListen() {
+  const it = State.listen.items[State.listen.idx];
+  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
+  const ok = norm(document.getElementById("listen-input").value) === norm(it.jp);
+  const r = document.getElementById("listen-result");
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.style.display = "block";
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="reveal-front" style="font-size:22px">${escapeHtml(it.jp)}</div>
+    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>
+    <button class="quiz-next-btn" style="margin-top:10px" onclick="listenNext()">다음 문장 →</button>`;
+}
+function listenNext() {
+  State.listen.idx = (State.listen.idx + 1) % State.listen.items.length;
+  renderListen();
 }
 
 function submitCorrect() {
@@ -1517,6 +1560,72 @@ function submitCorrect() {
 
 function closeAITool() {
   document.getElementById("ai-tool-overlay").classList.remove("open");
+}
+
+// ── AI 회화 (채팅) ─────────────────────────────────────
+function openChat() {
+  showView("ai-chat");
+  if (State.chat.history.length === 0) {
+    document.getElementById("chat-messages").innerHTML = "";
+    addChatBubble("model", "こんにちは！🌸\n안녕하세요! 일본어로 편하게 말 걸어보세요. 제가 도와드릴게요.");
+  }
+}
+
+function scrollChat() {
+  const w = document.getElementById("chat-messages");
+  w.scrollTop = w.scrollHeight;
+}
+
+function addChatBubble(role, text) {
+  const b = document.createElement("div");
+  b.className = "chat-bubble " + role;
+  b.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
+  document.getElementById("chat-messages").appendChild(b);
+  scrollChat();
+  return b;
+}
+
+async function sendChat() {
+  if (State.chat.busy) return;
+  const inp = document.getElementById("chat-input");
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = "";
+  addChatBubble("user", text);
+  State.chat.history.push({ role: "user", text });
+  State.chat.busy = true;
+
+  const el = addChatBubble("model", "…");
+  let acc = "";
+  try {
+    const res = await fetch(API + "/api/ai/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history: State.chat.history }),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let o; try { o = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (o.error) { el.textContent = o.error; el.classList.add("err"); State.chat.busy = false; return; }
+        if (o.t) { acc += o.t; el.innerHTML = escapeHtml(acc).replace(/\n/g, "<br>"); scrollChat(); }
+      }
+    }
+    if (acc.trim()) State.chat.history.push({ role: "model", text: acc });
+    else el.textContent = "응답이 비어 있어요.";
+  } catch (e) {
+    el.textContent = "연결 오류: " + e;
+  }
+  State.chat.busy = false;
+  scrollChat();
 }
 
 // SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)
