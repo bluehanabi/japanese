@@ -73,6 +73,7 @@ const State = {
 document.addEventListener("DOMContentLoaded", async () => {
   setGreeting();
   document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
+  loadReadingFreq();
   await loadHome();
   await loadSettings();
 
@@ -127,6 +128,29 @@ function newLyric() {
 }
 function confirmDeleteLyric(id) {
   if (confirm("이 가사를 삭제할까요?")) deleteSavedLyric(id);
+}
+
+// ── 한자 읽기 사용 비율 (음독/훈독, 정적 데이터) ──────────
+var READING_FREQ = {};
+async function loadReadingFreq() {
+  try {
+    const res = await fetch("/reading_freq.json", { cache: "force-cache" });
+    READING_FREQ = await res.json();
+  } catch (e) { READING_FREQ = {}; }
+}
+
+// 한자 한 글자의 읽기 비율 HTML (데이터 없으면 "")
+function readingFreqHtml(front) {
+  const rows = READING_FREQ[front];
+  if (!rows || !rows.length) return "";
+  const body = rows.map(x => `
+    <div class="rf-row">
+      <span class="rf-type ${x.t === "음" ? "on" : "kun"}">${x.t}</span>
+      <span class="rf-read">${escapeHtml(x.r)}</span>
+      <span class="rf-barwrap"><span class="rf-bar" style="width:${x.p}%"></span></span>
+      <span class="rf-pct">${x.p}%</span>
+    </div>`).join("");
+  return `<div class="rf-wrap"><div class="rf-title">읽기 사용 비율 <span>(대략)</span></div>${body}</div>`;
 }
 
 // 가사 입력/추출 영역(편집기) 표시 토글
@@ -768,6 +792,8 @@ function openCardDetail(id) {
     [card.back_reading, card.back_meaning].filter(Boolean).join("  ·  ");
   // 문법은 쓰기 연습 숨김
   document.getElementById("cd-write-btn").style.display = card.type === "grammar" ? "none" : "";
+  // 한자면 읽기 사용 비율(음독/훈독) 표시
+  document.getElementById("cd-freq").innerHTML = card.type === "kanji" ? readingFreqHtml(card.front) : "";
   document.getElementById("card-detail-overlay").classList.add("open");
   // AI 뜻 풀이·예문 (캐시 있으면 즉시, 없으면 생성하며 스트리밍)
   streamInto("/api/ai/explain", { card_id: card.id }, document.getElementById("cd-ai"));
@@ -1252,10 +1278,12 @@ function showWritingResult(data) {
   }
   const ok = data.rating === "good" || data.rating === "easy";
   el.className = `writing-result ${ok ? "ok" : "ng"}`;
+  const card = State.writing.cards[State.writing.index];
+  const freq = card && card.type === "kanji" ? readingFreqHtml(card.front) : "";
   el.innerHTML = `
     <div class="wr-head"><span class="wr-rating">${RATING_LABEL[data.rating] || ""}</span>
       <span class="wr-score">${data.score}점</span></div>
-    <div class="wr-feedback">${escapeHtml(data.feedback || "")}</div>`;
+    <div class="wr-feedback">${escapeHtml(data.feedback || "")}</div>${freq}`;
 }
 
 function writingAdvance() {
