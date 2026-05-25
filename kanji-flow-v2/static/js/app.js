@@ -57,6 +57,7 @@ const State = {
   settings: {
     daily_new_cards: 10,
     study_mode: "both",
+    study_order: "jlpt",
     show_reading_on_front: "0",
     shuffle_study: "1",
     active_levels: "N5,N4",
@@ -1061,6 +1062,9 @@ async function loadSettingsUI() {
   const el = document.getElementById(modeMap[mode]);
   if (el) el.classList.add("active");
 
+  // 학습 순서 세그먼트
+  setStudyOrder(s.study_order || "jlpt");
+
   // 발음 표시 토글
   document.getElementById("setting-show-reading").checked =
     (s.show_reading_on_front === "1");
@@ -1113,10 +1117,15 @@ function changeNewCards(delta) {
 
 function setStudyMode(mode) {
   State.settings.study_mode = mode;
-  document.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
   const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word", grammar_only: "seg-grammar" };
-  const el = document.getElementById(modeMap[mode]);
-  if (el) el.classList.add("active");
+  Object.values(modeMap).forEach(id => document.getElementById(id)?.classList.remove("active"));
+  document.getElementById(modeMap[mode])?.classList.add("active");
+}
+
+function setStudyOrder(order) {
+  State.settings.study_order = order;
+  document.getElementById("seg-order-jlpt")?.classList.toggle("active", order === "jlpt");
+  document.getElementById("seg-order-freq")?.classList.toggle("active", order === "frequency");
 }
 
 function toggleShowReading(checked) {

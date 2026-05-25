@@ -575,6 +575,17 @@
 
       <div class="settings-item">
         <div>
+          <div class="settings-item-label">학습 순서</div>
+          <div class="settings-item-sub">신규 카드를 어떤 순서로 배울지</div>
+        </div>
+        <div class="segment-control" id="order-seg">
+          <button class="seg-btn active" id="seg-order-jlpt" onclick="setStudyOrder('jlpt')">JLPT순</button>
+          <button class="seg-btn"        id="seg-order-freq" onclick="setStudyOrder('frequency')">빈도순</button>
+        </div>
+      </div>
+
+      <div class="settings-item">
+        <div>
           <div class="settings-item-label">앞면에 발음 표시</div>
           <div class="settings-item-sub">카드 앞면에 히라가나 표시 여부</div>
         </div>

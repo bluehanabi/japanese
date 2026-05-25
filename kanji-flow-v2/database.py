@@ -135,6 +135,7 @@ def init_db():
         ("active_levels",         "N5,N4"),
         ("active_kanken",         "10급,9급,8급,7급"),   # 학습할 한자 漢検 급수
         ("shuffle_study",         "1"),
+        ("study_order",           "jlpt"),   # jlpt(현재) | frequency(실사용 빈도순)
         ("gemini_api_key",        ""),
         ("gemini_model",          "gemini-3.5-flash"),
     ]

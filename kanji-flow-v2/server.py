@@ -17,6 +17,34 @@ from srs import calculate_next_review, QUALITY_MAP, get_card_state, predict_inte
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
+# 단어 학습 빈도 순위 (CEJC 일상대화 + jpdb 애니/게임 블렌딩) — '빈도순' 학습용
+WORD_FREQ = {}
+try:
+    with open(os.path.join("static", "word_freq.json"), encoding="utf-8") as _f:
+        WORD_FREQ = {k: v for k, v in json.load(_f).items() if not k.startswith("_")}
+except Exception:
+    WORD_FREQ = {}
+
+_GRADE_ORDER = ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"]
+_LV_ORDER = {"N5": 0, "N4": 1, "N3": 2, "N2": 3, "N1": 4}
+
+
+def _freq_pick(rows, n):
+    """신규 카드 후보를 '빈도순'으로 골라 n개 반환. 타입(단어/한자/문법)을 정규화 위치로 섞는다."""
+    words = [r for r in rows if r["type"] == "word"]
+    kanji = [r for r in rows if r["type"] == "kanji"]
+    gram  = [r for r in rows if r["type"] == "grammar"]
+    words.sort(key=lambda r: WORD_FREQ.get(r["front"], 10**9))
+    kanji.sort(key=lambda r: (_GRADE_ORDER.index(r["sub_level"]) if r["sub_level"] in _GRADE_ORDER else 99, r["id"]))
+    gram.sort(key=lambda r: (_LV_ORDER.get(r["jlpt_level"], 9), r["id"]))
+    keyed = []
+    for lst in (words, kanji, gram):
+        L = len(lst) or 1
+        for i, r in enumerate(lst):
+            keyed.append((i / L, r))
+    keyed.sort(key=lambda t: t[0])
+    return [r for _, r in keyed[:n]]
+
 # ── 선택적 비밀번호 게이트 (환경변수 APP_PASSWORD 설정 시 활성) ──
 import hashlib
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
@@ -200,10 +228,8 @@ def get_today_cards():
         """, [today] + level_params + categories).fetchall()
 
     # 신규 카드 (한 번도 안 본 것, 오늘 개수 제한)
-    # 셔플 켜짐: 무작위로 뽑아 타입(한자·단어·문법)이 골고루 섞이게 함
-    new_order = "RANDOM()" if shuffle_study == "1" else "c.jlpt_level DESC, c.type ASC, c.id ASC"
-    query_params_new = level_params + categories + [remaining_new]
-    new_cards = conn.execute(f"""
+    study_order = get_setting("study_order", "jlpt")
+    base_new = f"""
         SELECT c.*, r.ease_factor, r.interval, r.repetitions,
                r.next_review, r.total_reviews, r.correct_count, r.id as review_id
         FROM cards c
@@ -212,9 +238,16 @@ def get_today_cards():
         AND {level_cond}
         AND c.category IN ({category_placeholders})
         {type_filter}
-        ORDER BY {new_order}
-        LIMIT ?
-    """, query_params_new).fetchall()
+    """
+    if study_order == "frequency" and WORD_FREQ:
+        # 후보를 넉넉히 가져와 파이썬에서 실사용 빈도순으로 선별
+        cand = conn.execute(base_new + " LIMIT 4000", level_params + categories).fetchall()
+        new_cards = _freq_pick(cand, remaining_new)
+    else:
+        # 셔플 켜짐: 무작위로 뽑아 타입이 골고루 섞이게 함 (JLPT순 = 기존)
+        new_order = "RANDOM()" if shuffle_study == "1" else "c.jlpt_level DESC, c.type ASC, c.id ASC"
+        new_cards = conn.execute(base_new + f" ORDER BY {new_order} LIMIT ?",
+                                 level_params + categories + [remaining_new]).fetchall()
 
     conn.close()
 
