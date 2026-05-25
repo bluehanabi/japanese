@@ -1219,19 +1219,34 @@ def ai_score_writing():
     import urllib.request
     payload = {
         "contents": [{"parts": [{"text": prompt}, {"inline_data": {"mime_type": "image/png", "data": image}}]}],
-        "generationConfig": {"responseMimeType": "application/json"},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "maxOutputTokens": 200,          # 작은 JSON만 필요 → 생성 시간 단축
+            "thinkingConfig": {"thinkingBudget": 0},  # 단순 인식 → 내부 추론 끄고 즉답
+        },
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    try:
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+
+    def _call(p):
+        req = urllib.request.Request(url, data=json.dumps(p).encode(),
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=40) as resp:
             res = json.loads(resp.read().decode("utf-8"))
-        out = json.loads(res["candidates"][0]["content"]["parts"][0]["text"])
+        return json.loads(res["candidates"][0]["content"]["parts"][0]["text"])
+
+    import urllib.error
+    try:
+        out = _call(payload)
+    except urllib.error.HTTPError as e:
+        # 일부 모델은 thinkingConfig 미지원 → 빼고 한 번 재시도
+        payload["generationConfig"].pop("thinkingConfig", None)
+        try:
+            out = _call(payload)
+        except Exception as e2:
+            if isinstance(e2, urllib.error.HTTPError):
+                return jsonify({"error": f"Gemini 오류 {e2.code}: {e2.read().decode('utf-8','ignore')[:200]}"}), 502
+            return jsonify({"error": f"채점 실패: {e2}"}), 502
     except Exception as e:
-        import urllib.error
-        if isinstance(e, urllib.error.HTTPError):
-            return jsonify({"error": f"Gemini 오류 {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}), 502
         return jsonify({"error": f"채점 실패: {e}"}), 502
 
     score = int(out.get("score", 0))
