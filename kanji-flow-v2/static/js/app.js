@@ -686,13 +686,13 @@ async function loadStats() {
   const stats = await apiFetch("/api/stats");
 
   // 선택한 범위 기준 (총 카드 절대값은 설정 화면에만 표시)
-  document.getElementById("s-total").textContent     = stats.scope_total ?? stats.total_cards;
-  document.getElementById("s-mastered").textContent  = stats.scope_mastered ?? stats.mastered;
-  document.getElementById("s-today-done").textContent = stats.today_reviewed;
-  document.getElementById("s-accuracy").textContent  = stats.today_accuracy + "%";
+  document.getElementById("s-total").textContent     = stats.scope_total ?? stats.total_cards ?? 0;
+  document.getElementById("s-mastered").textContent  = stats.scope_mastered ?? stats.mastered ?? 0;
+  document.getElementById("s-today-done").textContent = stats.today_reviewed ?? 0;
+  document.getElementById("s-accuracy").textContent  = (stats.today_accuracy ?? 0) + "%";
 
-  renderHeatmap(stats.heatmap);
-  renderWeakCards(stats.weak_cards);
+  renderHeatmap(stats.heatmap || []);
+  renderWeakCards(stats.weak_cards || []);
 }
 
 function renderHeatmap(data) {

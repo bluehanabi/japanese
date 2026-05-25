@@ -1,21 +1,29 @@
 package com.kanjiflow.app;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.speech.tts.TextToSpeech;
+import android.view.Gravity;
+import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
 
     // 외부 접속 전용 (어느 네트워크에서나 동일하게 접속)
     private static final String APP_URL = "http://211.109.91.64:8005/";
+    // 앱 테마 배경색 (#0d0f14) — 로딩 중에도 검은 화면 대신 이 색을 보여준다
+    private static final int BG = 0xFF0D0F14;
 
     private WebView web;
+    private ProgressBar spinner;
     private long pausedAt = 0;
     private TextToSpeech tts;
     private boolean ttsReady = false;
@@ -41,6 +49,7 @@ public class MainActivity extends Activity {
         });
 
         web = new WebView(this);
+        web.setBackgroundColor(BG);
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
@@ -51,12 +60,32 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new TTSBridge(), "AndroidTTS");
 
         web.setWebChromeClient(new WebChromeClient());
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                if (spinner != null) spinner.setVisibility(View.VISIBLE);
+            }
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (spinner != null) spinner.setVisibility(View.GONE);
+            }
+        });
 
-        setContentView(web);
+        // 로딩 중 검은 화면 대신 브랜드 배경 + 스피너를 보여준다
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(BG);
+        spinner = new ProgressBar(this);
+        FrameLayout.LayoutParams spLp = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        root.addView(web, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        root.addView(spinner, spLp);
+        setContentView(root);
 
         if (savedInstanceState != null) {
             web.restoreState(savedInstanceState);
+            spinner.setVisibility(View.GONE);
         } else {
             web.loadUrl(APP_URL);
         }
