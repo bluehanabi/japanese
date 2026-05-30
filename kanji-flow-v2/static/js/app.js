@@ -2408,22 +2408,19 @@ function stripFurigana(s) {
 function cardTTSText(card) {
   if (!card) return "";
   if (card.type === "kanji") {
-    // 비율 데이터가 있으면 화면과 동일하게 '빈도순'으로 읽는다 (많이 쓰는 것 먼저)
+    // 읽기를 여러 개 이어 읽으면(ひと、じん…) 헷갈리므로 '가장 많이 쓰는 읽기 하나'만 읽는다
     const rows = READING_FREQ[card.front];
     if (rows && rows.length) {
-      const toRead = s => s.replace(/[（）()]/g, "");   // 送りがな 괄호 합쳐서 자연스럽게
-      const parts = rows.slice().sort((a, b) => b.p - a.p).slice(0, 2).map(x => toRead(x.r));
-      return parts.join("、") || card.front;
+      const top = rows.slice().sort((a, b) => b.p - a.p)[0];
+      return top.r.replace(/[（）()]/g, "") || card.front;   // 送りがな 괄호 합쳐 자연스럽게
     }
-    // 데이터 없으면: 첫 음독 + 첫 훈독
+    // 데이터 없으면: 첫 음독, 없으면 첫 훈독 하나
     const r = card.back_reading || "";
     const clean = s => (s.split("・")[0] || "").replace(/[*\-]/g, "").replace(/[（）()]/g, "").trim();
     const onM = r.match(/음독:\s*([^/]+)/);
     const kunM = r.match(/훈독:\s*(.+)/);
-    const parts = [];
-    if (onM) { const t = clean(onM[1]); if (t) parts.push(t); }
-    if (kunM) { const t = clean(kunM[1]); if (t) parts.push(t); }
-    return parts.join("、") || card.front;
+    const one = (onM && clean(onM[1])) || (kunM && clean(kunM[1])) || "";
+    return one || card.front;
   }
   if (card.type === "grammar") {
     // 화면에 보이는 패턴을 그대로 읽는다: 괄호 주석·물결표·한글 제거 후 일본어(가나·한자)만
