@@ -1,11 +1,7 @@
-name: Deploy to Mac server
+name: Deploy to Mac server (수동 전용)
 
-# 푸시할 때마다, 또는 Actions 탭에서 수동으로 배포
+# 수동(workflow_dispatch)으로만 실행. 자동 배포는 맥의 launchd(install-autodeploy.sh)가 담당
 on:
-  push:
-    branches:
-      - claude/gallant-albattani-XvrfY
-      - claude/pensive-ramanujan-n57KJ
   workflow_dispatch:
 
 jobs:
