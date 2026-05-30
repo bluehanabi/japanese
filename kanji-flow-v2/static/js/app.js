@@ -1076,7 +1076,8 @@ function renderMatch(container, cards, onDone) {
   if (items.length < 2) { onDone(0); return; }
   let left = shuffleArr(items.map((c, i) => ({ i, t: shortMeaning(c.back_meaning) })));
   let right = shuffleArr(items.map((c, i) => {
-    const r = displayReading(c);
+    // 한자는 글자만 보여준다(읽기를 떠올리는 게 목적). 단어는 읽기(가나)가 도움되니 함께 표시.
+    const r = c.type === "kanji" ? "" : displayReading(c);
     return { i, t: c.front + (r ? `（${r}）` : "") };
   }));
   let selL = null, selR = null, matched = new Set(), mistakes = 0;
