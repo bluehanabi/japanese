@@ -1955,19 +1955,26 @@ function showQuizReveal(q, isCorrect) {
   const info = q.info || {};
   const el = document.getElementById("quiz-reveal");
   el.className = `quiz-reveal ${isCorrect ? "ok" : "ng"}`;
+  // 정답 보기에 이미 표시된 정보는 생략(중복 줄여 한 화면에 들어오게):
+  //  front2meaning: 보기=뜻이라 뜻 생략, 읽기만 보여줌
+  //  meaning2front: 보기=한자/단어라 front 생략, 읽기·뜻 보여줌
+  //  front2reading: 보기=읽기라 읽기 생략, 뜻 보여줌
+  const dir = q.direction;
+  const showReading = info.reading && dir !== "front2reading";
+  const showMeaning = info.meaning && dir !== "front2meaning";
+  const lastQ = State.quiz.index >= State.quiz.questions.length - 1;
+  const nextText = lastQ ? "결과 보기 →" : "다음 →";
   el.innerHTML = `
-    <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}</div>
-    <div class="reveal-front">${escapeHtml(info.front || q.prompt)}</div>
-    ${info.reading ? `<div class="reveal-reading">${escapeHtml(displayReading({type: info.type, front: info.front, back_reading: info.reading}))}</div>` : ""}
-    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(shortMeaning(info.meaning))}</div>` : ""}
-    <button class="tts-btn" style="margin-top:10px" onclick="speakQuizReveal()">🔊 발음</button>`;
+    <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}
+      <button class="tts-btn tts-inline" onclick="speakQuizReveal()">🔊</button></div>
+    ${showReading ? `<div class="reveal-reading">${escapeHtml(displayReading({type: info.type, front: info.front, back_reading: info.reading}))}</div>` : ""}
+    ${showMeaning ? `<div class="reveal-meaning">${escapeHtml(shortMeaning(info.meaning))}</div>` : ""}
+    <button class="quiz-next-btn inline" onclick="quizNext()">${nextText}</button>`;
   el.style.display = "block";
 
-  const nb = document.getElementById("quiz-next-btn");
-  nb.textContent = (State.quiz.index >= State.quiz.questions.length - 1) ? "결과 보기 →" : "다음 →";
-  nb.style.display = "block";
-
-  speakQuizReveal();   // 정답 공개 시 일본어 발음 자동 재생
+  // 외부 다음 버튼은 사용 안 함(reveal 안으로 통합)
+  document.getElementById("quiz-next-btn").style.display = "none";
+  speakQuizReveal();
 }
 
 function quizNext() {
