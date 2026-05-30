@@ -1109,9 +1109,14 @@ function renderMatch(container, cards, onDone) {
   draw();
 }
 async function startMatchGame() {
-  const data = await apiFetch("/api/today");
-  let pool = [...(data.review_cards || []), ...(data.new_cards || [])].filter(c => c.back_meaning && c.front);
-  if (pool.length < 4) { const v = await apiFetch("/api/cards?per_page=40&scope=1"); pool = (v.cards || []).filter(c => c.back_meaning && c.front); }
+  showToast("불러오는 중…");
+  // 여태 학습 중인(복습 이력 있는) 단어 전체를 풀로 → 매 라운드 무작위 5개라 골고루 등장
+  const data = await apiFetch("/api/cards?state=studied&per_page=1000");
+  let pool = (data.cards || []).filter(c => c.back_meaning && c.front);
+  if (pool.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
+    const t = await apiFetch("/api/today");
+    pool = [...(t.review_cards || []), ...(t.new_cards || [])].filter(c => c.back_meaning && c.front);
+  }
   if (pool.length < 4) { showToast("카드가 부족해요"); return; }
   State.lesson = { mode: "match" };
   State.match = { pool };
