@@ -743,6 +743,7 @@ def build_quiz():
             "options": options,
             # 정답 공개 후 보여줄 전체 정보 (한자/단어 · 읽기 · 뜻)
             "info": {
+                "type": c["type"],
                 "front": c["front"],
                 "reading": c["back_reading"],
                 "meaning": c["back_meaning"],

@@ -143,11 +143,20 @@ async function loadReadingFreq() {
   } catch (e) { READING_FREQ = {}; }
 }
 
+// 빈도순 정렬 + 5% 미만은 노이즈로 제외 (한자 읽기 표시 공통 규칙)
+const READ_MIN_PCT = 5;
+function _topReadings(front) {
+  const rows = READING_FREQ[front];
+  if (!rows || !rows.length) return [];
+  const filtered = rows.filter(x => x.p >= READ_MIN_PCT).sort((a, b) => b.p - a.p);
+  return filtered.length ? filtered : rows.slice().sort((a, b) => b.p - a.p).slice(0, 2);
+}
+
 // 한자 한 글자의 읽기 비율 HTML (데이터 없으면 "")
 function readingFreqHtml(front) {
-  const rows = READING_FREQ[front];
-  if (!rows || !rows.length) return "";
-  const body = rows.map(x => `
+  const top = _topReadings(front);
+  if (!top.length) return "";
+  const body = top.map(x => `
     <div class="rf-row">
       <span class="rf-type ${x.t === "음" ? "on" : "kun"}">${x.t}</span>
       <span class="rf-read">${escapeHtml(x.r)}</span>
@@ -159,10 +168,33 @@ function readingFreqHtml(front) {
 
 // 쓰기 연습용 한 줄: "(음) セイ 43% · (훈) い（きる） 14% · …" (빈도순, 5%↑만)
 function readingFreqLine(front) {
-  const rows = READING_FREQ[front];
-  if (!rows || !rows.length) return "";
-  return rows.slice().sort((a, b) => b.p - a.p)
-    .map(x => `(${x.t}) ${x.r} ${x.p}%`).join("  ·  ");
+  const top = _topReadings(front);
+  if (!top.length) return "";
+  return top.map(x => `(${x.t}) ${x.r} ${x.p}%`).join("  ·  ");
+}
+
+// 카드 표시용 읽기: 한자는 빈도순 상위만, 없으면 별표(*) 항목 제거. 그 외는 원본.
+function displayReading(card) {
+  if (!card) return "";
+  if (card.type === "kanji") {
+    const top = _topReadings(card.front);
+    if (top.length) return top.map(x => `(${x.t}) ${x.r}`).join("  ·  ");
+    return (card.back_reading || "").split(/\s*\/\s*/).map(sec => {
+      const m = sec.match(/^([^:]+:)\s*(.+)$/);
+      if (!m) return sec;
+      const items = m[2].split("・").map(t => t.trim()).filter(t => t && !t.startsWith("*"));
+      return items.length ? `${m[1]} ${items.join("・")}` : "";
+    }).filter(Boolean).join(" / ");
+  }
+  return card.back_reading || "";
+}
+
+// 단어 의미: "1. … 2. … 3. …" 사전식 다의어를 상위 2개만 (3번부터는 사전 부연설명이라 잘라냄)
+function shortMeaning(s) {
+  if (!s) return "";
+  const parts = String(s).split(/\s+(?=\d+\.\s)/);
+  if (parts.length <= 2) return s;
+  return parts.slice(0, 2).join(" ") + " …";
 }
 
 // 가사 입력/추출 영역(편집기) 표시 토글
@@ -578,8 +610,9 @@ function showCard(index) {
   document.getElementById("card-back-meaning").textContent = card.back_meaning;
 
   const backReading = document.getElementById("card-back-reading");
-  backReading.textContent = card.back_reading || "";
-  backReading.style.display = card.back_reading ? "" : "none";
+  const rText = displayReading(card);
+  backReading.textContent = rText;
+  backReading.style.display = rText ? "" : "none";
 
   // 쓰기 연습 버튼은 한자/단어만 (문법 제외)
   document.getElementById("card-write-btn").style.display =
@@ -830,8 +863,8 @@ function lessonIntro(body) {
     <div class="lesson-intro">${L.cards.map((c, i) => `
       <div class="li-row" onclick="speak(cardTTSText(State.lesson.cards[${i}]))">
         <div class="li-front">${escapeHtml(c.front)}</div>
-        <div class="li-info"><div>${escapeHtml(c.back_meaning || "")}</div>
-          <div class="li-read">${escapeHtml(c.back_reading || "")}</div></div>
+        <div class="li-info"><div>${escapeHtml(shortMeaning(c.back_meaning))}</div>
+          <div class="li-read">${escapeHtml(displayReading(c))}</div></div>
         <div>🔊</div></div>`).join("")}</div>
     <button class="start-btn" style="margin-top:14px" onclick="lessonNext()">시작하기 →</button>`;
 }
@@ -841,10 +874,10 @@ function lessonQuiz(body, dir) {
   function showQ() {
     if (qi >= items.length) { lessonNext(); return; }
     const c = items[qi];
-    const prompt = dir === "f2m" ? c.front : c.back_meaning;
-    const sub = dir === "f2m" ? (c.back_reading || "") : "";
-    const answer = dir === "f2m" ? c.back_meaning : c.front;
-    const pool = (dir === "f2m" ? L.words.map(x => x.back_meaning) : L.words.map(x => x.front)).filter(Boolean);
+    const prompt = dir === "f2m" ? c.front : shortMeaning(c.back_meaning);
+    const sub = dir === "f2m" ? displayReading(c) : "";
+    const answer = dir === "f2m" ? shortMeaning(c.back_meaning) : c.front;
+    const pool = (dir === "f2m" ? L.words.map(x => shortMeaning(x.back_meaning)) : L.words.map(x => x.front)).filter(Boolean);
     const opts = shuffleArr([answer, ...shuffleArr(pool.filter(x => x !== answer)).slice(0, 3)]);
     body.innerHTML = `
       <div class="lesson-prompt">${escapeHtml(prompt)}<div class="li-read">${escapeHtml(sub)}</div></div>
@@ -864,7 +897,7 @@ function lessonQuiz(body, dir) {
         rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
         rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div>
           <div class="reveal-front">${escapeHtml(c.front)}</div>
-          <div class="reveal-meaning">${escapeHtml((c.back_reading || "") + " " + (c.back_meaning || ""))}</div>
+          <div class="reveal-meaning">${escapeHtml((displayReading(c) || "") + " " + shortMeaning(c.back_meaning))}</div>
           <button class="quiz-next-btn" id="lq-next">다음 →</button>`;
         document.getElementById("lq-next").onclick = () => { qi++; showQ(); };
       };
@@ -894,7 +927,7 @@ function lessonListen(body) {
         const ok = opts[i] === answer; if (!ok) L.wrong.add(c.front);
         body.querySelectorAll(".quiz-option").forEach((bb, j) => { bb.classList.add("disabled"); if (opts[j] === answer) bb.classList.add("correct"); else if (j === i) bb.classList.add("wrong"); });
         const rev = document.getElementById("ll-rev"); rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
-        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div><div class="reveal-front">${escapeHtml(c.front)}</div><div class="reveal-meaning">${escapeHtml((c.back_reading || "") + " " + (c.back_meaning || ""))}</div><button class="quiz-next-btn" id="ll-next">다음 →</button>`;
+        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div><div class="reveal-front">${escapeHtml(c.front)}</div><div class="reveal-meaning">${escapeHtml((displayReading(c) || "") + " " + shortMeaning(c.back_meaning))}</div><button class="quiz-next-btn" id="ll-next">다음 →</button>`;
         document.getElementById("ll-next").onclick = () => { qi++; showQ(); };
       };
     });
@@ -982,9 +1015,12 @@ function lessonSentence(body) {
     showS();
   });
 }
-function finishLesson() {
+async function finishLesson() {
   const L = State.lesson;
-  L.cards.forEach(c => apiFetch("/api/review", "POST", { card_id: c.id, answer: L.wrong.has(c.front) ? "hard" : "good" }));
+  // 모든 카드 평가가 DB에 반영될 때까지 기다린다 → 홈 통계(연속 일수 등)가 즉시 갱신
+  await Promise.all(L.cards.map(c =>
+    apiFetch("/api/review", "POST", { card_id: c.id, answer: L.wrong.has(c.front) ? "hard" : "good" })));
+  loadHome();   // 백그라운드로 홈 데이터 새로고침(완료 직후 누가 홈으로 가도 최신값)
   const body = document.getElementById("lesson-body");
   document.getElementById("lesson-step").textContent = "완료";
   const review = L.mode === "review";
@@ -1003,8 +1039,11 @@ function finishLesson() {
 function renderMatch(container, cards, onDone) {
   const items = cards.filter(c => c.back_meaning && c.front).slice(0, 5);
   if (items.length < 2) { onDone(0); return; }
-  let left = shuffleArr(items.map((c, i) => ({ i, t: c.back_meaning })));
-  let right = shuffleArr(items.map((c, i) => ({ i, t: c.front + (c.back_reading ? `（${c.back_reading}）` : "") })));
+  let left = shuffleArr(items.map((c, i) => ({ i, t: shortMeaning(c.back_meaning) })));
+  let right = shuffleArr(items.map((c, i) => {
+    const r = displayReading(c);
+    return { i, t: c.front + (r ? `（${r}）` : "") };
+  }));
   let selL = null, selR = null, matched = new Set(), mistakes = 0;
   function draw() {
     container.innerHTML = `<div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 12px">짝을 맞춰보세요</div>
@@ -1155,8 +1194,8 @@ function renderCardList(cards, total) {
       <div class="card-list-item" onclick="openCardDetail(${card.id})">
         <div class="card-list-kanji ${frontCls}">${escapeHtml(card.front)}</div>
         <div class="card-list-info">
-          <div class="card-list-meaning">${escapeHtml(card.back_meaning)}</div>
-          <div class="card-list-reading">${escapeHtml(card.back_reading || "")}</div>
+          <div class="card-list-meaning">${escapeHtml(shortMeaning(card.back_meaning))}</div>
+          <div class="card-list-reading">${escapeHtml(displayReading(card))}</div>
         </div>
         <div class="card-state-dot ${card.state}"></div>
       </div>`;
@@ -1876,8 +1915,8 @@ function showQuizReveal(q, isCorrect) {
   el.innerHTML = `
     <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}</div>
     <div class="reveal-front">${escapeHtml(info.front || q.prompt)}</div>
-    ${info.reading ? `<div class="reveal-reading">${escapeHtml(info.reading)}</div>` : ""}
-    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(info.meaning)}</div>` : ""}
+    ${info.reading ? `<div class="reveal-reading">${escapeHtml(displayReading({type: info.type, front: info.front, back_reading: info.reading}))}</div>` : ""}
+    ${info.meaning ? `<div class="reveal-meaning">${escapeHtml(shortMeaning(info.meaning))}</div>` : ""}
     <button class="tts-btn" style="margin-top:10px" onclick="speakQuizReveal()">🔊 발음</button>`;
   el.style.display = "block";
 
@@ -1896,8 +1935,8 @@ function speakQuizReveal() {
   const q = State.quiz.questions[State.quiz.index];
   if (!q) return;
   const info = q.info || {};
-  const r = (info.reading || "").replace(/음독:|훈독:/g, "").replace(/\//g, " ").trim();
-  speak(r || info.front);
+  // 한자는 빈도순 상위만 읽도록 cardTTSText 재활용 (음독·훈독 전부 읽는 문제 방지)
+  speak(cardTTSText({ type: info.type, front: info.front, back_reading: info.reading }));
 }
 
 function showQuizComplete() {
@@ -2275,8 +2314,16 @@ async function doLogin() {
 }
 
 // ── TTS 발음 (가나 기반으로 정확하게) ──────────────────
+// 같은 텍스트가 짧은 시간 내 두 번 들어오면 무시 (UI 핸들러 중복 호출에서 발생하는 겹침 방지)
+let _lastSpeakText = "", _lastSpeakAt = 0;
+function _dupSpeak(text) {
+  const now = Date.now();
+  if (text === _lastSpeakText && now - _lastSpeakAt < 1200) return true;
+  _lastSpeakText = text; _lastSpeakAt = now;
+  return false;
+}
 function speak(text) {
-  if (!text) return;
+  if (!text || _dupSpeak(text)) return;
   // APK: 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
   if (window.AndroidTTS && window.AndroidTTS.speak) {
     try { window.AndroidTTS.speak(text); return; } catch (e) {}
@@ -2291,7 +2338,7 @@ function speak(text) {
 
 // 속도 조절 발음 (듣기 연습 '느리게'). 네이티브 speakRate 우선, 없으면 보통/웹.
 function speakRate(text, rate) {
-  if (!text) return;
+  if (!text || _dupSpeak(text + "@" + rate)) return;
   if (window.AndroidTTS && window.AndroidTTS.speakRate) {
     try { window.AndroidTTS.speakRate(text, rate); return; } catch (e) {}
   }
