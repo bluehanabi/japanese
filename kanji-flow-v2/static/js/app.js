@@ -189,12 +189,27 @@ function displayReading(card) {
   return card.back_reading || "";
 }
 
-// 단어 의미: "1. … 2. … 3. …" 사전식 다의어를 상위 2개만 (3번부터는 사전 부연설명이라 잘라냄)
+// 단어 의미 정리: 사전에서 긁어온 다의어/부연·일본어 인용을 학습용 핵심뜻으로 압축.
+//  • "1. … 2. … 3. …" → 1번 핵심뜻만 (2·3번은 대개 부연·희귀 의미)
+//  • 가운뎃점(·, ・)은 쉼표로
+//  • 뜻에 섞인 일본어 인용(‘…’ 안의 가나·한자 등)은 제거. 단 제거 후 조사만 남으면 원본 유지.
+//  • 번호 없는 백과사전식 긴 문장은 첫 구절만.
 function shortMeaning(s) {
   if (!s) return "";
-  const parts = String(s).split(/\s+(?=\d+\.\s)/);
-  if (parts.length <= 2) return s;
-  return parts.slice(0, 2).join(" ") + " …";
+  s = String(s).trim();
+  const parts = s.split(/\s*\d+\.\s*/).map(x => x.trim()).filter(Boolean);
+  let m = parts.length ? parts[0] : s;
+  if (parts.length <= 1 && m.length > 22) m = m.split(/[.。]/)[0].trim();   // 긴 설명문 → 첫 구절
+  m = m.replace(/\s*[·・]\s*/g, ", ");                                       // 구분점 → 쉼표
+  if (/[぀-ゟァ-ヿ㐀-鿿]/.test(m)) {                                          // 일본어가 남아 있으면 인용 정리
+    const cleaned = m
+      .replace(/[‘'“"「『][^’'”"」』]*[’'”"」』]/g, "")    // 따옴표 인용 통째로 제거
+      .replace(/[぀-ゟァ-ヿ㐀-鿿々〆]+/g, "")              // 남은 가나·한자 런 제거
+      .replace(/\s*,\s*(?=,|$)/g, "").replace(/^[\s,]+/, "")
+      .replace(/\s{2,}/g, " ").trim();
+    if (cleaned.length >= 2 && !/^(의|을|를|은|는|이|가|에|로|와|과|도|만)(\s|,|$)/.test(cleaned)) m = cleaned;
+  }
+  return m;
 }
 
 // 가사 입력/추출 영역(편집기) 표시 토글
