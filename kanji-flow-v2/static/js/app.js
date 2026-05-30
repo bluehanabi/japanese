@@ -1922,12 +1922,30 @@ function showQuizQuestion(index) {
 
   const promptEl = document.getElementById("quiz-prompt");
   promptEl.textContent = q.prompt;
-  promptEl.classList.toggle("small", q.prompt.length > 6);
+  fitOneLine(promptEl, 76, 22);   // 길이에 상관없이 한 줄에 맞게 글자 크기 자동 축소
 
   const optsEl = document.getElementById("quiz-options");
   optsEl.innerHTML = q.options.map((opt, i) =>
     `<button class="quiz-option" onclick="answerQuiz(this, ${i})">${escapeHtml(opt)}</button>`
   ).join("");
+}
+
+// 텍스트가 컨테이너 폭을 넘지 않도록 한 줄에 맞춰 글자 크기 자동 축소
+function fitOneLine(el, maxPx, minPx) {
+  el.style.whiteSpace = "nowrap";
+  const fit = () => {
+    const parent = el.parentElement;
+    const maxW = (parent ? parent.clientWidth : el.clientWidth) - 6;
+    if (maxW <= 0) return;
+    let size = maxPx;
+    el.style.fontSize = size + "px";
+    let guard = 0;
+    while (el.scrollWidth > maxW && size > minPx && guard++ < 120) {
+      size -= 2;
+      el.style.fontSize = size + "px";
+    }
+  };
+  requestAnimationFrame(fit);   // 레이아웃 잡힌 뒤 측정
 }
 
 function answerQuiz(btn, optionIndex) {
