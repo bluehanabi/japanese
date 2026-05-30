@@ -54,6 +54,14 @@ try:
 except Exception:
     PATH = {"sections": []}
 
+# 한자 자연스러운 한국어 뜻(미리 생성) — 있으면 새김 대신 사용 (三→'셋, 삼', 学→'배우다')
+KANJI_MEANING = {}
+try:
+    with open(os.path.join("static", "kanji_meaning.json"), encoding="utf-8") as _kf:
+        KANJI_MEANING = json.load(_kf)
+except Exception:
+    KANJI_MEANING = {}
+
 
 # ── 한글 뜻 정리 (학습용 핵심뜻으로 압축, 원본은 back_meaning_full 로 보존) ──────
 _JP_RE    = re.compile(r"[぀-ヿ㐀-鿿]")
@@ -100,8 +108,11 @@ def clean_meaning(s):
     return _clean_jp_cite(pick, pick)
 
 
-def clean_kanji_meaning(s):
-    """한자 일반 표시용: '사람 인' → '사람', '밝을 명, 땅 이름 맹' → '밝을' (뒤 음 제거)."""
+def clean_kanji_meaning(front, s):
+    """한자 일반 표시용. 미리 만든 자연스러운 뜻이 있으면 그것(三→'셋, 삼'),
+    없으면 새김에서 음을 떼서 사용('사람 인'→'사람', '나무 목'→'나무')."""
+    if front in KANJI_MEANING:
+        return KANJI_MEANING[front]
     if not s:
         return ""
     first = re.split(r"[,，]", s)[0].strip()
@@ -113,7 +124,10 @@ def _apply_meaning(d):
     """카드 dict에 정리된 back_meaning(학습용) + back_meaning_full(원본)을 채운다."""
     orig = d.get("back_meaning") or ""
     d["back_meaning_full"] = orig
-    d["back_meaning"] = clean_kanji_meaning(orig) if d.get("type") == "kanji" else clean_meaning(orig)
+    if d.get("type") == "kanji":
+        d["back_meaning"] = clean_kanji_meaning(d.get("front", ""), orig)
+    else:
+        d["back_meaning"] = clean_meaning(orig)
     return d
 
 
@@ -738,7 +752,7 @@ def build_quiz():
     conn.close()
     pool = [dict(r) for r in pool]
     for c in pool:   # 퀴즈 보기·정답도 학습용 핵심뜻으로 통일
-        c["back_meaning"] = (clean_kanji_meaning(c["back_meaning"]) if c["type"] == "kanji"
+        c["back_meaning"] = (clean_kanji_meaning(c["front"], c["back_meaning"]) if c["type"] == "kanji"
                              else clean_meaning(c["back_meaning"]))
 
     # 출제 대상 선정
