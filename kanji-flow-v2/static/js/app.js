@@ -189,27 +189,45 @@ function displayReading(card) {
   return card.back_reading || "";
 }
 
-// 단어 의미 정리: 사전에서 긁어온 다의어/부연·일본어 인용을 학습용 핵심뜻으로 압축.
-//  • "1. … 2. … 3. …" → 1번 핵심뜻만 (2·3번은 대개 부연·희귀 의미)
-//  • 가운뎃점(·, ・)은 쉼표로
-//  • 뜻에 섞인 일본어 인용(‘…’ 안의 가나·한자 등)은 제거. 단 제거 후 조사만 남으면 원본 유지.
-//  • 번호 없는 백과사전식 긴 문장은 첫 구절만.
+// 뜻에 섞인 일본어 인용(‘…’ 안의 가나·한자 등) 정리. 정리 후 조사만 남으면 원본 유지.
+function _cleanJpCite(m, fallback) {
+  m = m.replace(/\s*[·・]\s*/g, ", ");                  // 구분점 → 쉼표
+  if (!/[぀-ゟァ-ヿ㐀-鿿]/.test(m)) return m;
+  const cleaned = m
+    .replace(/[‘'“"「『][^’'”"」』]*[’'”"」』]/g, "")    // 따옴표 인용 통째로 제거
+    .replace(/[぀-ゟァ-ヿ㐀-鿿々〆]+/g, "")              // 남은 가나·한자 런 제거
+    .replace(/\s*,\s*(?=,|$)/g, "").replace(/^[\s,]+/, "")
+    .replace(/\s{2,}/g, " ").trim();
+  if (cleaned.length >= 2 && !/^(의|을|를|은|는|이|가|에|로|와|과|도|만)(\s|,|$)/.test(cleaned)) return cleaned;
+  return _cleanJpCite0(fallback);   // 부실하면 원본을 구분점만 정리해 유지
+}
+function _cleanJpCite0(m) { return String(m).replace(/\s*[·・]\s*/g, ", "); }
+
+// 문법 설명형(메타) 뜻 판별: "~가리키는 말/모양", 대명사·지시 등 사전 설명은 실사용 뜻이 아님
+function _isMetaSense(x) {
+  return x.length > 9
+    || /(가리키|나타내|이르는|대명사|지시|준말|압축|말씨)/.test(x)
+    || (/(말|모양|것|일|꼴)$/.test(x) && x.length > 4);
+}
+
+// 단어 의미 정리: 사전에서 긁어온 다의어/문법설명/일본어 인용을 학습용 핵심뜻으로 압축.
+//  • "1. … 2. … 3. …" → 문법 설명형이 아닌 '첫 구체적 뜻' 우선, 없으면 가장 짧은 뜻
+//    (예: ここ "1.근칭의 지시대명사 2.여기" → "여기")
+//  • 가운뎃점(·, ・)은 쉼표로, 뜻에 섞인 일본어 인용은 제거
+//  • 번호 없는 백과사전식 긴 문장은 첫 구절만
 function shortMeaning(s) {
   if (!s) return "";
   s = String(s).trim();
-  const parts = s.split(/\s*\d+\.\s*/).map(x => x.trim()).filter(Boolean);
-  let m = parts.length ? parts[0] : s;
-  if (parts.length <= 1 && m.length > 22) m = m.split(/[.。]/)[0].trim();   // 긴 설명문 → 첫 구절
-  m = m.replace(/\s*[·・]\s*/g, ", ");                                       // 구분점 → 쉼표
-  if (/[぀-ゟァ-ヿ㐀-鿿]/.test(m)) {                                          // 일본어가 남아 있으면 인용 정리
-    const cleaned = m
-      .replace(/[‘'“"「『][^’'”"」』]*[’'”"」』]/g, "")    // 따옴표 인용 통째로 제거
-      .replace(/[぀-ゟァ-ヿ㐀-鿿々〆]+/g, "")              // 남은 가나·한자 런 제거
-      .replace(/\s*,\s*(?=,|$)/g, "").replace(/^[\s,]+/, "")
-      .replace(/\s{2,}/g, " ").trim();
-    if (cleaned.length >= 2 && !/^(의|을|를|은|는|이|가|에|로|와|과|도|만)(\s|,|$)/.test(cleaned)) m = cleaned;
+  let senses = s.split(/\s*\d+\.\s*/).map(x => x.trim()).filter(Boolean);
+  if (senses.length <= 1) {
+    let m = senses[0] || s;
+    if (m.length > 22) m = m.split(/[.。]/)[0].trim();   // 긴 설명문 → 첫 구절
+    return _cleanJpCite(m, m);
   }
-  return m;
+  senses = senses.map(x => x.replace(/\s*[·・]\s*/g, ", "));
+  let pick = senses.find(x => !_isMetaSense(x))
+          || senses.slice().sort((a, b) => a.length - b.length)[0];
+  return _cleanJpCite(pick, pick);
 }
 
 // 가사 입력/추출 영역(편집기) 표시 토글
@@ -991,13 +1009,15 @@ function lessonSentence(body) {
       const prompt = dir === "jp2kr" ? it.jp : it.kr;
       const hint = dir === "jp2kr" ? "일본어를 보고 한국어를 순서대로" : "한국어를 보고 일본어를 순서대로";
       const target = (dir === "jp2kr" ? it.kr_tiles : it.jp_tiles).slice();
-      let answer = [], bank = shuffleArr(target.slice()), done = false;
+      let answer = [], bank = shuffleArr(target.slice()), bankOrig = bank.slice(), done = false;
       function draw() {
         body.innerHTML = `
           <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 8px">${hint}</div>
           <div class="lesson-prompt" style="font-size:18px;margin:6px 0 14px">${escapeHtml(prompt)}</div>
           <div class="sent-answer">${answer.map((t, i) => `<button class="tile" data-a="${i}">${escapeHtml(t)}</button>`).join("") || '<span class="sent-placeholder">아래에서 순서대로 누르세요</span>'}</div>
-          <div class="sent-bank">${bank.map((t, i) => t === null ? "" : `<button class="tile" data-b="${i}">${escapeHtml(t)}</button>`).join("")}</div>
+          <div class="sent-bank">${bank.map((t, i) => t === null
+            ? `<button class="tile used" disabled>${escapeHtml(bankOrig[i] || "·")}</button>`
+            : `<button class="tile" data-b="${i}">${escapeHtml(t)}</button>`).join("")}</div>
           <div class="sent-result" id="ls-res" style="display:none"></div>
           <button class="quiz-next-btn" id="ls-check">확인</button>`;
         body.querySelectorAll("[data-b]").forEach(b => b.onclick = () => {
@@ -1110,16 +1130,17 @@ function matchRound() {
 // 복습하기 — 여태 학습한 카드(약한 순)를 멀티스텝 레슨으로 연습
 async function startReview() {
   showToast("복습 카드 준비 중…");
-  const data = await apiFetch("/api/cards?personalized=1&per_page=8");
-  let cards = (data.cards || []).filter(c => c.front && c.back_meaning);
-  if (cards.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
+  // 여태 학습 중인(복습 이력 있는) 단어 전체를 풀로 삼아 매 세션 무작위 8개 → 결국 모든 단어가 돌아가며 등장
+  const data = await apiFetch("/api/cards?state=studied&per_page=1000");
+  let pool = (data.cards || []).filter(c => c.front && c.back_meaning);
+  if (pool.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
     const t = await apiFetch("/api/today");
-    const seen = new Set(cards.map(c => c.id));
+    const seen = new Set(pool.map(c => c.id));
     for (const c of [...(t.review_cards || []), ...(t.new_cards || [])])
-      if (c.front && c.back_meaning && !seen.has(c.id)) cards.push(c);
+      if (c.front && c.back_meaning && !seen.has(c.id)) pool.push(c);
   }
-  cards = cards.slice(0, 8);
-  if (cards.length < 2) { showToast("아직 복습할 카드가 없어요. 학습 경로로 시작해 보세요!"); return; }
+  if (pool.length < 2) { showToast("아직 복습할 카드가 없어요. 학습 경로로 시작해 보세요!"); return; }
+  const cards = shuffleArr(pool).slice(0, 8);
   startLesson(cards, -1, "review");
 }
 
@@ -1248,7 +1269,7 @@ function openCardDetail(id) {
   cdCard = card;
   document.getElementById("cd-front").textContent = card.front;
   document.getElementById("cd-sub").textContent =
-    [card.back_reading, card.back_meaning].filter(Boolean).join("  ·  ");
+    [card.back_reading, card.back_meaning_full || card.back_meaning].filter(Boolean).join("  ·  ");
   // 문법은 쓰기 연습 숨김
   document.getElementById("cd-write-btn").style.display = card.type === "grammar" ? "none" : "";
   // 한자면 읽기 사용 비율(음독/훈독) 표시
@@ -1677,7 +1698,8 @@ function renderWritingCard() {
   const card = w.cards[w.index];
   if (!card) return;
 
-  document.getElementById("writing-meaning").textContent = card.back_meaning || card.front;
+  // 쓰기 연습은 한자 새김+음(예: '사람 인')을 그대로 보여준다
+  document.getElementById("writing-meaning").textContent = card.back_meaning_full || card.back_meaning || card.front;
   // 한자면 정리된 읽기(빈도순, 음/훈 표기)만, 데이터 없으면 원본
   document.getElementById("writing-reading").textContent =
     (card.type === "kanji" && readingFreqLine(card.front)) || card.back_reading || "";
@@ -2027,6 +2049,7 @@ function showSentence(i) {
   }
   S.answer = [];
   S.bank = shuffleArr(S.target);
+  S.bankOrig = S.bank.slice();   // 자리 고정용(타일 빠져도 높이 유지)
 
   document.getElementById("sent-progress").style.width = Math.round(i / S.items.length * 100) + "%";
   document.getElementById("sent-progress-text").textContent = `${i + 1} / ${S.items.length}`;
@@ -2044,7 +2067,9 @@ function renderSentence() {
     `<button class="tile" onclick="unpickTile(${i})">${escapeHtml(t)}</button>`).join("")
     || '<span class="sent-placeholder">아래에서 단어를 순서대로 누르세요</span>';
   document.getElementById("sent-bank").innerHTML = S.bank.map((t, i) =>
-    t === null ? "" : `<button class="tile" onclick="pickTile(${i})">${escapeHtml(t)}</button>`).join("");
+    t === null
+      ? `<button class="tile used" disabled>${escapeHtml((S.bankOrig && S.bankOrig[i]) || "·")}</button>`
+      : `<button class="tile" onclick="pickTile(${i})">${escapeHtml(t)}</button>`).join("");
 }
 
 function pickTile(i) {

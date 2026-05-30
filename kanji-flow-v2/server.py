@@ -55,6 +55,68 @@ except Exception:
     PATH = {"sections": []}
 
 
+# ── 한글 뜻 정리 (학습용 핵심뜻으로 압축, 원본은 back_meaning_full 로 보존) ──────
+_JP_RE    = re.compile(r"[぀-ヿ㐀-鿿]")
+_JP_RUN   = re.compile(r"[぀-ヿ㐀-鿿々〆]+")
+_JP_QUOTE = re.compile(r"[‘'“\"「『][^’'”\"」』]*[’'”\"」』]")
+_PARTICLE = re.compile(r"^(의|을|를|은|는|이|가|에|로|와|과|도|만)(\s|,|$)")
+_META     = re.compile(r"(가리키|나타내|이르는|대명사|지시|준말|압축|말씨)")
+_META_TAIL = re.compile(r"(말|모양|것|일|꼴)$")
+
+
+def _clean_jp_cite(m, fallback):
+    m = re.sub(r"\s*[·・]\s*", ", ", m)
+    if not _JP_RE.search(m):
+        return m
+    cleaned = _JP_QUOTE.sub("", m)
+    cleaned = _JP_RUN.sub("", cleaned)
+    cleaned = re.sub(r"\s*,\s*(?=,|$)", "", cleaned)
+    cleaned = re.sub(r"^[\s,]+", "", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    if len(cleaned) >= 2 and not _PARTICLE.match(cleaned):
+        return cleaned
+    return re.sub(r"\s*[·・]\s*", ", ", fallback)
+
+
+def _is_meta_sense(x):
+    return len(x) > 9 or bool(_META.search(x)) or (bool(_META_TAIL.search(x)) and len(x) > 4)
+
+
+def clean_meaning(s):
+    """단어 뜻: 다의어/문법설명/일본어 인용 → 학습용 핵심뜻. (예: ここ '1.근칭의 지시대명사 2.여기' → '여기')"""
+    if not s:
+        return ""
+    s = s.strip()
+    senses = [x.strip() for x in re.split(r"\s*\d+\.\s*", s) if x.strip()]
+    if len(senses) <= 1:
+        m = senses[0] if senses else s
+        if len(m) > 22:
+            m = re.split(r"[.。]", m)[0].strip()
+        return _clean_jp_cite(m, m)
+    senses = [re.sub(r"\s*[·・]\s*", ", ", x) for x in senses]
+    pick = next((x for x in senses if not _is_meta_sense(x)), None)
+    if pick is None:
+        pick = sorted(senses, key=len)[0]
+    return _clean_jp_cite(pick, pick)
+
+
+def clean_kanji_meaning(s):
+    """한자 일반 표시용: '사람 인' → '사람', '밝을 명, 땅 이름 맹' → '밝을' (뒤 음 제거)."""
+    if not s:
+        return ""
+    first = re.split(r"[,，]", s)[0].strip()
+    toks = first.split()
+    return " ".join(toks[:-1]) if len(toks) > 1 else first
+
+
+def _apply_meaning(d):
+    """카드 dict에 정리된 back_meaning(학습용) + back_meaning_full(원본)을 채운다."""
+    orig = d.get("back_meaning") or ""
+    d["back_meaning_full"] = orig
+    d["back_meaning"] = clean_kanji_meaning(orig) if d.get("type") == "kanji" else clean_meaning(orig)
+    return d
+
+
 def _card_dict(row):
     dd = dict(row)
     if dd.get("extra_info"):
@@ -65,6 +127,7 @@ def _card_dict(row):
     dd["state"] = get_card_state(dd["repetitions"], dd["interval"])
     rep, ef, iv = dd["repetitions"], dd["ease_factor"], dd["interval"]
     dd["hints"] = {a: predict_interval(rep, ef, iv, a) for a in ("again", "hard", "good", "easy")}
+    _apply_meaning(dd)
     return dd
 
 
@@ -337,6 +400,7 @@ def get_today_cards():
             a: predict_interval(rep, ef, iv, a)
             for a in ("again", "hard", "good", "easy")
         }
+        _apply_meaning(d)
         return d
 
     review_list = [row_to_dict(r) for r in review_cards]
@@ -612,6 +676,7 @@ def get_all_cards():
         if d.get("extra_info"):
             d["extra_info"] = json.loads(d["extra_info"])
         d["state"] = get_card_state(d["repetitions"], d["interval"])
+        _apply_meaning(d)
         return d
 
     return jsonify({
@@ -643,6 +708,7 @@ def search_cards():
         if d.get("extra_info"):
             d["extra_info"] = json.loads(d["extra_info"])
         d["state"] = get_card_state(d["repetitions"], d["interval"])
+        _apply_meaning(d)
         return d
 
     return jsonify({"results": [to_dict(r) for r in rows]})
@@ -671,6 +737,9 @@ def build_quiz():
     pool = conn.execute("SELECT id, type, front, back_meaning, back_reading, jlpt_level FROM cards").fetchall()
     conn.close()
     pool = [dict(r) for r in pool]
+    for c in pool:   # 퀴즈 보기·정답도 학습용 핵심뜻으로 통일
+        c["back_meaning"] = (clean_kanji_meaning(c["back_meaning"]) if c["type"] == "kanji"
+                             else clean_meaning(c["back_meaning"]))
 
     # 출제 대상 선정
     if ids:
@@ -1431,6 +1500,7 @@ def writing_cards():
             try: d["extra_info"] = json.loads(d["extra_info"])
             except: pass
         d["state"] = get_card_state(d["repetitions"], d["interval"])
+        _apply_meaning(d)
         return d
     return jsonify({"cards": [to_dict(r) for r in rows]})
 

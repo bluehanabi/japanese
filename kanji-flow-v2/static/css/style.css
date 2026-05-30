@@ -1902,6 +1902,10 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 .tile:active { transform: scale(0.95); }
+/* 단어칸에서 빠진 타일은 자리만 유지(투명) → 레이아웃이 위아래로 흔들리지 않음 */
+.tile.used { visibility: hidden; }
+/* 단어 보관함 높이 안정화 (두 줄 정도 확보) */
+.sent-bank { min-height: 52px; align-content: flex-start; }
 .sent-result {
   margin-top: 16px;
   padding: 14px;
