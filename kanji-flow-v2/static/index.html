@@ -6,11 +6,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="theme-color" content="#0d0f14"/>
-  <title>Kanji Flow 2.0</title>
-  <meta name="description" content="SM-2 간격 반복 알고리즘 기반 일본어 한자/단어 학습 앱"/>
+  <title>스이스이 — 일본어 학습</title>
+  <meta name="description" content="AI 기반 일본어 한자·단어·문법·쓰기 학습 앱 스이스이"/>
   <link rel="manifest" href="/manifest.json"/>
   <link rel="apple-touch-icon" href="/icons/icon-192.png"/>
-  <meta name="apple-mobile-web-app-title" content="Kanji Flow"/>
+  <meta name="apple-mobile-web-app-title" content="스이스이"/>
   <link rel="stylesheet" href="/css/style.css"/>
 </head>
 <body>
@@ -22,7 +22,7 @@
   <div id="home-view" class="view active">
     <div class="home-header">
       <div class="home-greeting" id="home-greeting">오늘도 화이팅! 👋</div>
-      <h1 class="home-title">Kanji <span>Flow</span></h1>
+      <h1 class="home-title">스이<span>스이</span> <span class="home-title-jp">すいすい</span></h1>
     </div>
 
     <!-- 오늘의 요약 -->
@@ -44,23 +44,33 @@
       </div>
     </div>
 
-    <!-- 학습 시작 버튼 -->
-    <button class="start-btn" id="start-study-btn" onclick="startStudy()">
+    <!-- 학습 경로 (듀오링고식) -->
+    <button class="start-btn" onclick="showView('path')"
+            style="background:linear-gradient(135deg,#22c55e,#16a34a);margin-bottom:10px">
+      🗺️ 학습 경로
+    </button>
+
+    <!-- 복습하기 (여태 학습한 카드를 멀티스텝 레슨으로) -->
+    <button class="start-btn" id="start-study-btn" onclick="startReview()">
       <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
         <path d="M5 3l14 9-14 9V3z" fill="white"/>
       </svg>
-      지금 바로 학습 시작
+      복습하기
     </button>
 
-    <!-- 보조 액션: 랜덤 퀴즈 / 쓰기 연습 -->
-    <div class="home-actions">
-      <button class="action-btn" onclick="openQuizSetup()">
-        <span class="action-emoji">🎯</span>
-        <span>랜덤 퀴즈</span>
+    <!-- 단독 연습 4개 -->
+    <div class="home-actions home-grid4">
+      <button class="action-btn" onclick="startStudy(false)">
+        <span class="action-emoji">🃏</span><span>카드 학습</span>
       </button>
-      <button class="action-btn" onclick="openWritingFromHome()">
-        <span class="action-emoji">✍️</span>
-        <span>쓰기 연습</span>
+      <button class="action-btn" onclick="startRandomQuiz()">
+        <span class="action-emoji">🎯</span><span>랜덤 퀴즈</span>
+      </button>
+      <button class="action-btn" onclick="startWritingPractice()">
+        <span class="action-emoji">✍️</span><span>쓰기 연습</span>
+      </button>
+      <button class="action-btn" onclick="startSentencePractice()">
+        <span class="action-emoji">🧩</span><span>문장 연습</span>
       </button>
     </div>
 
@@ -77,8 +87,8 @@
 
     <!-- 카드 상태 분포 -->
     <div class="section">
-      <div class="section-title">학습 현황</div>
-      <div class="state-bar-wrap animate-in" style="animation-delay:0.15s">
+      <div class="section-title">학습 현황 <span style="color:var(--text-muted);font-weight:500;font-size:12px">› 학습한 카드 보기</span></div>
+      <div class="state-bar-wrap animate-in" style="animation-delay:0.15s;cursor:pointer" onclick="goStudied()">
         <div class="state-bar">
           <div class="state-bar-seg new"      id="bar-new"      style="flex:1"></div>
           <div class="state-bar-seg learning" id="bar-learning" style="flex:0"></div>
@@ -126,6 +136,7 @@
         <div class="card-face card-front">
           <div class="card-type-badge" id="front-level-badge">N5</div>
           <div class="card-main-text" id="card-front-text">日</div>
+          <div class="card-front-reading" id="card-front-reading" style="display:none"></div>
           <div class="card-hint card-tap-hint">
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/>
@@ -138,12 +149,23 @@
           <div class="card-back-kanji" id="card-back-kanji"></div>
           <div class="card-back-meaning" id="card-back-meaning"></div>
           <div class="card-back-reading" id="card-back-reading"></div>
-          <button class="write-inline-btn" id="card-write-btn"
-                  onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
+          <div class="card-back-actions">
+            <button class="tts-btn" onclick="event.stopPropagation(); speakCurrentCard()">🔊 발음</button>
+            <button class="ai-btn" onclick="event.stopPropagation(); aiExplainCurrent()">🤖 AI 설명</button>
+            <button class="write-inline-btn" id="card-write-btn"
+                    onclick="event.stopPropagation(); openWritingForCurrent()">✍️ 쓰기 연습</button>
+          </div>
           <div class="card-divider"></div>
           <div class="card-words" id="card-back-words"></div>
         </div>
       </div>
+    </div>
+
+    <!-- 통합 학습용 사지선다 패널 -->
+    <div class="uni-choice" id="uni-choice" style="display:none">
+      <div class="uni-choice-dir" id="uni-choice-dir"></div>
+      <div class="uni-choice-prompt" id="uni-choice-prompt"></div>
+      <div class="uni-choice-options" id="uni-choice-options"></div>
     </div>
 
     <!-- 평가 버튼 -->
@@ -192,7 +214,11 @@
           <div class="lbl">정확도</div>
         </div>
       </div>
-      <button class="start-btn" onclick="showView('home'); loadHome();" style="margin:0">
+      <div class="complete-ai" id="complete-ai" style="display:none"></div>
+      <button class="start-btn" id="complete-more" onclick="startStudy(true)" style="margin:0 0 10px">
+        🔄 더 학습하기
+      </button>
+      <button class="start-btn ghost" id="complete-home" onclick="showView('home'); loadHome();" style="margin:0">
         홈으로 돌아가기
       </button>
     </div>
@@ -220,6 +246,9 @@
         <div class="quiz-prompt" id="quiz-prompt">日</div>
       </div>
       <div class="quiz-options" id="quiz-options"></div>
+      <!-- 정답 공개 후 전체 정보 -->
+      <div class="quiz-reveal" id="quiz-reveal" style="display:none"></div>
+      <button class="quiz-next-btn" id="quiz-next-btn" style="display:none" onclick="quizNext()">다음 →</button>
     </div>
 
     <!-- 퀴즈 완료 -->
@@ -246,6 +275,45 @@
   </div>
 
   <!-- ══════════════════════════════════════════
+       문장 연습 (단어 타일 배열)
+  ══════════════════════════════════════════ -->
+  <div id="sentence-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-grammar">🧩 문장</div>
+      <div class="study-progress-wrap">
+        <div class="study-progress-bar">
+          <div class="study-progress-fill" id="sent-progress" style="width:0%"></div>
+        </div>
+        <div class="study-progress-text" id="sent-progress-text">0 / 0</div>
+      </div>
+      <div class="study-close" onclick="endSentence()">✕</div>
+    </div>
+
+    <div class="sent-body" id="sent-body">
+      <div class="sent-direction" id="sent-direction"></div>
+      <div class="sent-prompt" id="sent-prompt"></div>
+      <div class="sent-answer" id="sent-answer"></div>
+      <div class="sent-bank" id="sent-bank"></div>
+      <button class="start-btn" id="sent-check" onclick="checkSentence()" style="margin:18px 20px 0">확인</button>
+      <div class="sent-result" id="sent-result" style="display:none"></div>
+    </div>
+
+    <!-- 문장 연습 완료 -->
+    <div class="study-complete" id="sent-complete" style="display:none">
+      <div class="complete-emoji">🧩</div>
+      <div class="complete-title">문장 연습 완료!</div>
+      <div class="complete-sub" id="sent-complete-sub">잘 하셨어요!</div>
+      <div class="complete-stats">
+        <div class="complete-stat"><div class="num" id="sent-total">0</div><div class="lbl">문장</div></div>
+        <div class="complete-stat"><div class="num" id="sent-correct">0</div><div class="lbl">정답</div></div>
+        <div class="complete-stat"><div class="num" id="sent-accuracy">0%</div><div class="lbl">정확도</div></div>
+      </div>
+      <button class="start-btn" onclick="startSentencePractice()" style="margin:0 0 10px">🔄 새 문장</button>
+      <button class="start-btn ghost" onclick="endSentence()" style="margin:0">홈으로 돌아가기</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
        단어장 / 탐색기
   ══════════════════════════════════════════ -->
   <div id="vocab-view" class="view">
@@ -260,10 +328,13 @@
     </div>
 
     <!-- 필터 칩 -->
+    <div class="filter-bar">
     <div class="filter-chips">
-      <button class="chip active" id="chip-all"   onclick="setFilter('all')">전체</button>
-      <button class="chip"        id="chip-kanji" onclick="setFilter('kanji')">한자</button>
-      <button class="chip"        id="chip-word"  onclick="setFilter('word')">단어</button>
+      <button class="chip active" id="chip-rec"     onclick="setFilter('rec')">⭐ 추천</button>
+      <button class="chip"        id="chip-all"     onclick="setFilter('all')">전체</button>
+      <button class="chip"        id="chip-kanji"   onclick="setFilter('kanji')">한자</button>
+      <button class="chip"        id="chip-word"    onclick="setFilter('word')">단어</button>
+      <button class="chip"        id="chip-grammar" onclick="setFilter('grammar')">문법</button>
       <button class="chip"        id="chip-n5"    onclick="setFilter('n5')">N5</button>
       <button class="chip"        id="chip-n4"    onclick="setFilter('n4')">N4</button>
       <button class="chip"        id="chip-n3"    onclick="setFilter('n3')">N3</button>
@@ -272,6 +343,7 @@
       <button class="chip"        id="chip-new"   onclick="setFilter('state-new')">🆕 신규</button>
       <button class="chip"        id="chip-learning" onclick="setFilter('state-learning')">📖 학습중</button>
       <button class="chip"        id="chip-mastered" onclick="setFilter('state-mastered')">✅ 마스터</button>
+    </div>
     </div>
 
     <div class="card-list" id="card-list">
@@ -291,7 +363,7 @@
     <div class="stats-grid">
       <div class="stat-box">
         <div class="stat-box-num indigo" id="s-total">—</div>
-        <div class="stat-box-label">총 카드</div>
+        <div class="stat-box-label">학습 범위 카드</div>
       </div>
       <div class="stat-box">
         <div class="stat-box-num green" id="s-mastered">—</div>
@@ -329,17 +401,174 @@
       <p style="font-size:13px;color:var(--text-secondary)">좋아하는 일본어 노래 가사의 한자를 분석합니다</p>
     </div>
 
-    <textarea class="lyrics-textarea" id="lyrics-input"
-      placeholder="여기에 일본어 가사를 붙여넣으세요...&#10;예) 夜が明けるまで 君と歌いたい"></textarea>
+    <!-- 목록 보기 / 새 가사 -->
+    <div class="lyrics-btn-row" style="margin-bottom:8px">
+      <button class="analyze-btn" onclick="openLyricsList()">📋 목록 보기</button>
+      <button class="analyze-btn" onclick="newLyric()">➕ 새 가사</button>
+    </div>
 
-    <button class="analyze-btn" onclick="analyzeLyrics()">
-      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="M21 21l-4.35-4.35"/>
-      </svg>
-      한자 분석하기
-    </button>
+    <div id="lyrics-editor">
+      <input id="lyrics-title" class="ai-key-input" style="margin:0 20px 8px;width:calc(100% - 40px)" placeholder="제목 (예: 요네즈 켄시 - Lemon)"/>
+      <textarea class="lyrics-textarea" id="lyrics-input"
+        placeholder="여기에 일본어 가사를 붙여넣으세요...&#10;예) 夜が明けるまで 君と歌いたい"></textarea>
+
+      <div class="lyrics-btn-row">
+        <button class="analyze-btn" onclick="analyzeLyrics()">📋 한자 추출</button>
+        <button class="analyze-btn ai" onclick="aiLyrics()">🤖 AI 분석</button>
+      </div>
+      <div class="lyrics-btn-row" style="margin-top:8px">
+        <button class="analyze-btn" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.35)" onclick="saveLyrics()">💾 저장</button>
+      </div>
+    </div>
 
     <div class="lyrics-results" id="lyrics-results"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       번역
+  ══════════════════════════════════════════ -->
+  <div id="translate-view" class="view">
+    <div class="lyrics-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:4px;">번역</h2>
+      <p style="font-size:13px;color:var(--text-secondary)">한국어·일본어 번역 + 한자·발음·입력법까지</p>
+    </div>
+
+    <textarea class="lyrics-textarea" id="translate-input"
+      placeholder="번역할 문장을 입력하세요 (한국어 / 일본어 / 영어) — 또는 아래 📷로 이미지 첨부"></textarea>
+
+    <input type="file" id="translate-file" accept="image/*" style="display:none"
+           onchange="pickTranslateImage(this)">
+    <div id="translate-img-preview" class="translate-img-preview" style="display:none"></div>
+
+    <div class="lyrics-btn-row">
+      <button class="analyze-btn ai" onclick="doTranslate()">🌐 번역하기</button>
+      <button class="analyze-btn" onclick="document.getElementById('translate-file').click()">📷 이미지</button>
+    </div>
+    <div class="lyrics-btn-row" style="margin-top:8px">
+      <button class="analyze-btn" onclick="resetTranslate()">🗑 초기화</button>
+      <button class="analyze-btn" onclick="openTranslateHistory()">🕘 기록</button>
+    </div>
+
+    <div class="lyrics-results" id="translate-result"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       번역 기록 목록
+  ══════════════════════════════════════════ -->
+  <div id="translate-history-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title">🕘 번역 기록</div>
+          <div class="overlay-sub">최근 60일간 보관돼요</div>
+        </div>
+        <div class="overlay-close" onclick="closeTranslateHistory()">✕</div>
+      </div>
+      <div id="translate-history-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       학습 경로 (섹션 → 챕터 → 유닛)
+  ══════════════════════════════════════════ -->
+  <div id="path-view" class="view">
+    <div class="vocab-header">
+      <h2 style="font-size:22px;font-weight:700;margin-bottom:4px;">🗺️ 학습 경로</h2>
+      <p style="font-size:13px;color:var(--text-secondary)" id="path-sub">자주 쓰는 것부터 차근차근</p>
+    </div>
+    <div id="path-list"><div class="spinner"></div></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       유닛 레슨 (멀티스텝) / 짝 맞추기
+  ══════════════════════════════════════════ -->
+  <div id="lesson-view" class="view">
+    <div class="study-header">
+      <div class="study-close" onclick="lessonExit()">✕</div>
+      <div style="flex:1;text-align:center;font-size:13px;color:var(--text-secondary)" id="lesson-step"></div>
+      <div style="width:24px"></div>
+    </div>
+    <div id="lesson-body" style="padding:8px 20px 48px"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       활용 연습 (동사·형용사 활용)
+  ══════════════════════════════════════════ -->
+  <div id="conj-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-grammar">🔄 활용 연습</div>
+      <div style="flex:1"></div>
+      <div class="study-close" onclick="showView('ai')">✕</div>
+    </div>
+    <div id="conj-body" style="padding:0 20px">
+      <div style="text-align:center;color:var(--text-muted);font-size:13px;margin:10px 0" id="conj-progress"></div>
+      <div class="conj-card">
+        <div class="conj-word" id="conj-word"></div>
+        <div class="conj-sub" id="conj-meaning"></div>
+        <div class="conj-target" id="conj-target"></div>
+      </div>
+      <input id="conj-input" class="ai-key-input" style="width:100%;text-align:center;font-size:20px"
+             placeholder="활용형 입력 (가나/한자)" autocomplete="off" autocapitalize="none" autocorrect="off"/>
+      <button class="start-btn" id="conj-check" onclick="checkConj()" style="margin-top:12px">확인</button>
+      <div class="quiz-reveal" id="conj-result" style="display:none"></div>
+    </div>
+    <div class="study-complete" id="conj-complete" style="display:none">
+      <div class="complete-emoji">🔄</div>
+      <div class="complete-title">활용 연습 완료!</div>
+      <div class="complete-sub">규칙이 손에 익으면 회화가 쉬워져요</div>
+      <div class="complete-stats">
+        <div class="complete-stat"><div class="num" id="conj-total">0</div><div class="lbl">문제</div></div>
+        <div class="complete-stat"><div class="num" id="conj-correct">0</div><div class="lbl">정답</div></div>
+        <div class="complete-stat"><div class="num" id="conj-acc">0%</div><div class="lbl">정확도</div></div>
+      </div>
+      <button class="start-btn" onclick="startConjugation()" style="margin:0 0 10px">🔄 다시</button>
+      <button class="start-btn ghost" onclick="showView('ai')" style="margin:0">AI 허브로</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       듣기 연습 (받아쓰기, 느리게·반복)
+  ══════════════════════════════════════════ -->
+  <div id="listen-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-grammar">🎧 듣기 연습</div>
+      <div style="flex:1"></div>
+      <div class="study-close" onclick="showView('ai')">✕</div>
+    </div>
+    <div id="listen-body" style="padding:0 20px">
+      <div class="segment-control" style="margin:10px 0">
+        <button class="seg-btn active" id="lmode-dict" onclick="setListenMode('dictation')">받아쓰기</button>
+        <button class="seg-btn" id="lmode-choice" onclick="setListenMode('choice')">뜻 고르기</button>
+      </div>
+      <div style="text-align:center;color:var(--text-muted);font-size:13px;margin:8px 0" id="listen-progress"></div>
+      <div style="text-align:center;margin:20px 0 18px">
+        <button class="tts-btn" style="font-size:17px;padding:14px 22px" onclick="listenPlayNow(1)">🔊 듣기</button>
+        <button class="tts-btn" style="margin-left:8px" onclick="listenPlayNow(0.6)">🐢 느리게</button>
+      </div>
+      <div id="listen-dict">
+        <input id="listen-input2" class="ai-key-input" style="width:100%;font-size:18px"
+               placeholder="들은 일본어 문장을 입력" autocomplete="off" autocapitalize="none" autocorrect="off"/>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="analyze-btn" onclick="listenHint()">💡 뜻 힌트</button>
+          <button class="analyze-btn ai" id="listen-check2" onclick="checkListen2()">확인</button>
+        </div>
+        <div id="listen-hint-text" style="color:var(--text-secondary);font-size:14px;text-align:center;margin-top:8px"></div>
+      </div>
+      <div id="listen-choice" class="quiz-options" style="display:none"></div>
+      <div class="quiz-reveal" id="listen-result2" style="display:none"></div>
+    </div>
+    <div class="study-complete" id="listen-complete" style="display:none">
+      <div class="complete-emoji">🎧</div>
+      <div class="complete-title">듣기 연습 완료!</div>
+      <div class="complete-sub">귀가 트이고 있어요!</div>
+      <div class="complete-stats">
+        <div class="complete-stat"><div class="num" id="listen-total2">0</div><div class="lbl">문장</div></div>
+        <div class="complete-stat"><div class="num" id="listen-correct2">0</div><div class="lbl">정답</div></div>
+        <div class="complete-stat"><div class="num" id="listen-acc2">0%</div><div class="lbl">정확도</div></div>
+      </div>
+      <button class="start-btn" onclick="startListening()" style="margin:0 0 10px">🔄 다시</button>
+      <button class="start-btn ghost" onclick="showView('ai')" style="margin:0">AI 허브로</button>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════
@@ -371,9 +600,21 @@
           <div class="settings-item-sub">한자만 / 단어만 / 모두</div>
         </div>
         <div class="segment-control">
-          <button class="seg-btn active" id="seg-both"  onclick="setStudyMode('both')">모두</button>
-          <button class="seg-btn"        id="seg-kanji" onclick="setStudyMode('kanji_only')">한자</button>
-          <button class="seg-btn"        id="seg-word"  onclick="setStudyMode('word_only')">단어</button>
+          <button class="seg-btn active" id="seg-both"    onclick="setStudyMode('both')">모두</button>
+          <button class="seg-btn"        id="seg-kanji"   onclick="setStudyMode('kanji_only')">한자</button>
+          <button class="seg-btn"        id="seg-word"    onclick="setStudyMode('word_only')">단어</button>
+          <button class="seg-btn"        id="seg-grammar" onclick="setStudyMode('grammar_only')">문법</button>
+        </div>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">학습 순서</div>
+          <div class="settings-item-sub">신규 카드를 어떤 순서로 배울지</div>
+        </div>
+        <div class="segment-control" id="order-seg">
+          <button class="seg-btn active" id="seg-order-jlpt" onclick="setStudyOrder('jlpt')">JLPT순</button>
+          <button class="seg-btn"        id="seg-order-freq" onclick="setStudyOrder('frequency')">빈도순</button>
         </div>
       </div>
 
@@ -415,17 +656,48 @@
 
       <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:10px;">
         <div>
+          <div class="settings-item-label">학습할 한자 급수 (漢検)</div>
+          <div class="settings-item-sub">한자는 漢検 급수로 학습 (10급=쉬움 ~ 2급=어려움)</div>
+        </div>
+        <div class="multi-select-chips" id="settings-kanken-wrap"></div>
+      </div>
+
+      <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:10px;">
+        <div>
           <div class="settings-item-label">학습할 카테고리</div>
           <div class="settings-item-sub">원하는 단어 카테고리를 선택 (다중 선택)</div>
         </div>
-        <div class="multi-select-chips" id="settings-categories-wrap">
-          <button class="select-chip" id="setting-category-자연" onclick="toggleSettingCategory('자연')">자연</button>
-          <button class="select-chip" id="setting-category-사람" onclick="toggleSettingCategory('사람')">사람</button>
-          <button class="select-chip" id="setting-category-행동" onclick="toggleSettingCategory('행동')">행동</button>
-          <button class="select-chip" id="setting-category-감정" onclick="toggleSettingCategory('감정')">감정</button>
-          <button class="select-chip" id="setting-category-일상" onclick="toggleSettingCategory('일상')">일상</button>
-          <button class="select-chip" id="setting-category-지식" onclick="toggleSettingCategory('지식')">지식</button>
+        <div class="multi-select-chips" id="settings-categories-wrap"></div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">AI (Gemini)</div>
+      <div class="settings-item" style="flex-direction:column; align-items:flex-start; gap:8px;">
+        <div>
+          <div class="settings-item-label">Gemini API 키</div>
+          <div class="settings-item-sub">카드에서 🤖 AI 설명을 쓰려면 키가 필요해요. Google AI Studio에서 무료 발급. (이 기기에만 저장)</div>
         </div>
+        <input type="password" id="setting-gemini-key" class="ai-key-input"
+               placeholder="AIza..." oninput="onGeminiKey(this.value)" autocomplete="off"/>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">데이터 백업</div>
+      <a class="settings-item" href="/api/backup/download" style="text-decoration:none">
+        <div>
+          <div class="settings-item-label">📥 백업 다운로드</div>
+          <div class="settings-item-sub">학습 진도 DB를 파일로 저장 (서버는 매일 자동 백업돼요)</div>
+        </div>
+        <div style="color:var(--indigo);font-weight:700">↓</div>
+      </a>
+      <div class="settings-item" onclick="resetProgress()" style="cursor:pointer">
+        <div>
+          <div class="settings-item-label" style="color:#ff6b6b">🗑️ 진도 초기화</div>
+          <div class="settings-item-sub">모든 학습 진도·복습 기록을 리셋 (초기화 전 자동 백업됨)</div>
+        </div>
+        <div style="color:#ff6b6b;font-weight:700">↺</div>
       </div>
     </div>
 
@@ -444,9 +716,86 @@
         </div>
         <div style="color:var(--text-secondary);font-size:13px">2.0.0</div>
       </div>
+      <a class="settings-item" href="/download" style="text-decoration:none">
+        <div>
+          <div class="settings-item-label">📱 안드로이드 앱 (APK) 받기</div>
+          <div class="settings-item-sub">설치하면 홈 화면 아이콘으로 바로 실행</div>
+        </div>
+        <div style="color:var(--indigo);font-weight:700">받기 →</div>
+      </a>
     </div>
 
     <button class="save-btn" onclick="saveSettings()">설정 저장</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       AI 도우미 허브
+  ══════════════════════════════════════════ -->
+  <div id="ai-view" class="view">
+    <div class="stats-header"><h2 class="stats-title">✨ AI 도우미</h2></div>
+    <div class="ai-hub">
+      <button class="ai-card" onclick="openAITool('chat')">
+        <div class="ai-card-emoji">💬</div>
+        <div><div class="ai-card-t">AI 회화 연습</div><div class="ai-card-s">내 레벨에 맞춰 일본어로 대화</div></div>
+      </button>
+      <button class="ai-card" onclick="openAITool('correct')">
+        <div class="ai-card-emoji">📝</div>
+        <div><div class="ai-card-t">작문 첨삭</div><div class="ai-card-s">일본어 문장을 쓰면 교정·설명</div></div>
+      </button>
+      <button class="ai-card" onclick="openAITool('weakness')">
+        <div class="ai-card-emoji">📊</div>
+        <div><div class="ai-card-t">약점 리포트</div><div class="ai-card-s">복습 이력 분석 + 집중 제안</div></div>
+      </button>
+      <button class="ai-card" onclick="showView('vocab')">
+        <div class="ai-card-emoji">📚</div>
+        <div><div class="ai-card-t">단어장</div><div class="ai-card-s">학습한 단어 + AI 예문·풀이</div></div>
+      </button>
+      <button class="ai-card" onclick="startConjugation()">
+        <div class="ai-card-emoji">🔄</div>
+        <div><div class="ai-card-t">활용 연습</div><div class="ai-card-s">동사·형용사 활용형 입력 (ます·て·た·ない)</div></div>
+      </button>
+      <button class="ai-card" onclick="startListening()">
+        <div class="ai-card-emoji">🎧</div>
+        <div><div class="ai-card-t">듣기 연습</div><div class="ai-card-s">문장 듣고 받아쓰기 (느리게·반복)</div></div>
+      </button>
+      <button class="ai-card" onclick="startMatchGame()">
+        <div class="ai-card-emoji">🔗</div>
+        <div><div class="ai-card-t">짝 맞추기</div><div class="ai-card-s">한국어 ↔ 일본어 빠르게 매칭</div></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       AI 회화 (채팅)
+  ══════════════════════════════════════════ -->
+  <div id="ai-chat-view" class="view">
+    <div class="study-header">
+      <div class="card-type-badge badge-grammar">💬 AI 회화</div>
+      <div style="flex:1"></div>
+      <div class="study-close" onclick="showView('ai')">✕</div>
+    </div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-inputbar">
+      <input id="chat-input" class="chat-input" autocomplete="off"
+             placeholder="일본어로 말 걸어보세요"
+             onkeydown="if(event.key==='Enter')sendChat()"/>
+      <button class="chat-send" onclick="sendChat()">전송</button>
+    </div>
+  </div>
+
+  <!-- AI 도구 오버레이 (작문/약점 등) -->
+  <div id="ai-tool-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="ai-tool-title"></div>
+          <div class="overlay-sub" id="ai-tool-sub"></div>
+        </div>
+        <div class="overlay-close" onclick="closeAITool()">✕</div>
+      </div>
+      <div id="ai-tool-form"></div>
+      <div class="ai-body" id="ai-tool-body"></div>
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════════
@@ -458,12 +807,6 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0h6"/>
       </svg>
       홈
-    </button>
-    <button class="nav-btn" id="nav-vocab" onclick="showView('vocab')">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-      </svg>
-      단어장
     </button>
     <button class="nav-btn" id="nav-stats" onclick="showView('stats')">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -477,6 +820,18 @@
       </svg>
       가사
     </button>
+    <button class="nav-btn" id="nav-translate" onclick="showView('translate')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h7M3 5c0 4 2 7 6 9M9 3v2m-1.5 9c1.5-1 3-2.5 3.5-4.5M12 20l4-9 4 9m-7-2h6"/>
+      </svg>
+      번역
+    </button>
+    <button class="nav-btn" id="nav-ai" onclick="showView('ai')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>
+      </svg>
+      AI
+    </button>
     <button class="nav-btn" id="nav-settings" onclick="showView('settings')">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
         <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -485,6 +840,27 @@
       설정
     </button>
   </nav>
+
+  <!-- ══════════════════════════════════════════
+       단어 상세 (AI 예문·풀이)
+  ══════════════════════════════════════════ -->
+  <div id="card-detail-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="cd-front"></div>
+          <div class="overlay-sub" id="cd-sub"></div>
+        </div>
+        <div class="overlay-close" onclick="closeCardDetail()">✕</div>
+      </div>
+      <div class="lyrics-btn-row" style="margin-bottom:10px">
+        <button class="analyze-btn" onclick="cdSpeak()">🔊 발음</button>
+        <button class="analyze-btn" id="cd-write-btn" onclick="cdWrite()">✍️ 쓰기 연습</button>
+      </div>
+      <div id="cd-freq"></div>
+      <div class="ai-body" id="cd-ai"></div>
+    </div>
+  </div>
 
   <!-- ══════════════════════════════════════════
        한자 쓰기 연습 오버레이
@@ -499,25 +875,45 @@
         <div class="overlay-close" onclick="closeWriting()">✕</div>
       </div>
 
+      <div class="writing-modebar">
+        <div class="segment-control" style="flex:1">
+          <button class="seg-btn active" id="wmode-trace" onclick="setWriteMode('trace')">따라쓰기</button>
+          <button class="seg-btn" id="wmode-recall" onclick="setWriteMode('recall')">외워쓰기</button>
+        </div>
+        <div class="writing-nav-count" id="writing-count"></div>
+      </div>
+
       <div class="writing-canvas-wrap" id="writing-canvas"></div>
 
       <div class="writing-controls">
-        <button class="write-ctrl" id="wc-guide" onclick="toggleWriteGuide()">가이드 끄기</button>
         <button class="write-ctrl" id="wc-grid" onclick="toggleWriteGrid()">격자 끄기</button>
         <button class="write-ctrl danger" onclick="clearWriting()">지우기</button>
       </div>
 
-      <!-- 여러 글자 학습 시 다음/이전 -->
-      <div class="writing-nav" id="writing-nav" style="display:none">
-        <button class="write-nav-btn" onclick="writingPrev()">← 이전</button>
-        <div class="writing-nav-count" id="writing-count">1 / 1</div>
-        <button class="write-nav-btn" onclick="writingNext()">다음 →</button>
-      </div>
+      <div class="writing-result" id="writing-result" style="display:none"></div>
+
+      <button class="start-btn" id="writing-action" style="margin:14px 0 0" onclick="scoreWriting()">🤖 AI 채점</button>
     </div>
   </div>
 
   <!-- ══════════════════════════════════════════
        퀴즈 설정 모달
+  ══════════════════════════════════════════ -->
+  <div id="lyrics-list-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title">📋 저장된 가사</div>
+          <div class="overlay-sub">탭하면 열리고, 🗑로 삭제해요</div>
+        </div>
+        <div class="overlay-close" onclick="closeLyricsList()">✕</div>
+      </div>
+      <div id="saved-lyrics-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       랜덤 퀴즈 설정
   ══════════════════════════════════════════ -->
   <div id="quiz-setup-overlay" class="overlay">
     <div class="overlay-sheet">
@@ -554,10 +950,40 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════
+       AI 설명 오버레이
+  ══════════════════════════════════════════ -->
+  <div id="ai-overlay" class="overlay">
+    <div class="overlay-sheet">
+      <div class="overlay-head">
+        <div class="overlay-title-wrap">
+          <div class="overlay-title" id="ai-title">🤖 AI 설명</div>
+          <div class="overlay-sub" id="ai-sub"></div>
+        </div>
+        <div class="overlay-close" onclick="closeAI()">✕</div>
+      </div>
+      <div class="ai-body" id="ai-body"></div>
+    </div>
+  </div>
+
   <!-- 토스트 알림 -->
   <div id="toast"></div>
 
 </div>
+
+<!-- 비밀번호 게이트 (서버에 APP_PASSWORD 설정 시 표시) -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;z-index:500;background:var(--bg-deep);
+     flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center">
+  <div style="font-size:46px;margin-bottom:6px">🔒</div>
+  <div style="font-size:22px;font-weight:700">스이<span style="color:var(--indigo)">스이</span></div>
+  <div style="color:var(--text-secondary);font-size:13px;margin:6px 0 20px">비밀번호를 입력하세요</div>
+  <input id="login-pw" type="password" class="ai-key-input" style="max-width:280px;width:100%;text-align:center"
+         placeholder="비밀번호" autocomplete="current-password"
+         onkeydown="if(event.key==='Enter')doLogin()"/>
+  <button class="start-btn" style="max-width:280px;width:100%;margin-top:12px" onclick="doLogin()">들어가기</button>
+  <div id="login-error" style="color:#ff6b6b;font-size:13px;margin-top:10px"></div>
+</div>
+
 <script src="/js/canvas.js"></script>
 <script src="/js/app.js"></script>
 </body>

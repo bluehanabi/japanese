@@ -7,6 +7,11 @@ cd "$(dirname "$0")"
 
 PORT=8005
 
+# 비밀번호 게이트: .app_password 파일이 있으면 자동 적용 (깃에 안 올라감, launchd/수동 모두 동작)
+if [ -z "$APP_PASSWORD" ] && [ -f .app_password ]; then
+  export APP_PASSWORD="$(tr -d '\r\n' < .app_password)"
+fi
+
 # python3 찾기 — macOS 비대화식 SSH 세션은 Homebrew 경로가 PATH에 없을 수 있음
 PYTHON="${PYTHON:-}"
 if [ -z "$PYTHON" ]; then
@@ -28,12 +33,13 @@ if [ ! -d .venv ]; then
   ./.venv/bin/pip install -q -r requirements.txt
 fi
 
-# 기존에 8005 포트를 쓰는 프로세스 정리 (macOS/Linux 공통)
+# 기존 서버 종료 — 포트 점유 프로세스 + 다른 경로에서 뜬 잔여 server.py 둘 다 정리
 if lsof -ti tcp:$PORT >/dev/null 2>&1; then
   echo "[serve] 포트 $PORT 사용 중인 기존 프로세스 종료..."
-  lsof -ti tcp:$PORT | xargs kill 2>/dev/null || true
-  sleep 1
+  lsof -ti tcp:$PORT | xargs kill -9 2>/dev/null || true
 fi
+pkill -f "[s]erver.py" 2>/dev/null || true   # 예전 경로/방식으로 떠 있던 잔여 프로세스 정리
+sleep 1
 
 if [ "$1" = "--bg" ]; then
   echo "[serve] 백그라운드로 시작 (로그: server.log)"
