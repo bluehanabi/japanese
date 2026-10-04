@@ -23,7 +23,6 @@ jobs:
           password: ${{ secrets.DEPLOY_PASS }}
           source: "kanji-flow-v2/**,kanji-v3/**"
           target: "~/japanese"
-          overwrite: true
 
       # 2) 맥북에서 서버 재시작
       - name: 맥북에서 서버 재시작 (SSH)
