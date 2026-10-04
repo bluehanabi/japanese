@@ -27,11 +27,11 @@ h2 { font-size: 15px; margin: 22px 0 8px; color: var(--sub); font-weight: 600; }
 .muted { color: var(--sub); font-size: 14px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .between { justify-content: space-between; }
-button.btn { width: 100%; border: 0; border-radius: 14px; padding: 16px; font: inherit; font-size: 17px; font-weight: 700;
+.btn { display: block; text-align: center; text-decoration: none; cursor: pointer; width: 100%; border: 0; border-radius: 14px; padding: 16px; font: inherit; font-size: 17px; font-weight: 700;
   background: var(--accent); color: var(--accent-ink); }
-button.btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
-button.btn.sm { padding: 10px 14px; font-size: 15px; width: auto; }
-button.btn:disabled { opacity: .4; }
+.btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+.btn.sm { padding: 10px 14px; font-size: 15px; width: auto; }
+.btn:disabled { opacity: .4; }
 button.link { background: none; border: 0; color: var(--accent); font: inherit; padding: 6px 0; }
 .big-num { font-size: 44px; font-weight: 800; line-height: 1; }
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }

@@ -147,8 +147,8 @@ function viewIntro(i) {
     <div class="card center">
       <div class="muted">새 한자 · ${i + 1}번째 · ${x.sc}획</div>
       <div class="kanji xl">${x.c}</div>
-      <div class="ko">${esc(x.ko)}</div>
-      <div>${esc(x.m.join(', '))}</div>
+      <div class="ko">${esc(x.hun)}</div>
+      <div>${esc(x.m)}</div>
     </div>
     <div class="card">
       <b>읽기</b> <span class="muted">초록색이 먼저 외울 핵심</span>
@@ -166,13 +166,13 @@ function viewCard(id) {
   let front, back;
   if (c.kind === 'k') {
     front = `<div class="kanji xl">${x.c}</div><div class="muted">읽기와 뜻은?</div>`;
-    back = `<div class="center"><div class="ko">${esc(x.ko)} · ${esc(x.m.join(', '))}</div></div>${readingBlock(x, false)}
+    back = `<div class="center"><div class="ko">${esc(x.hun)} · ${esc(x.m)}</div></div>${readingBlock(x, false)}
       <div class="card" style="margin-top:12px;padding:6px 14px">${wordsBlock(x)}</div>`;
   } else {
     const w = x.w[c.wi] || x.w.find(v => v[0] === id.slice(2));
     front = `<div class="kanji word">${esc(w[0])}</div><div class="muted">어떻게 읽을까요?</div>`;
     back = `<div class="center"><div class="kanji" style="font-size:34px">${esc(w[1])}</div><div class="mt">${esc(w[2])}</div></div>
-      <div class="hint">${x.c} <b>${esc(x.ko)}</b> · 이 단어에서 <b class="hl">${esc(w[3] || '—')}</b></div>`;
+      <div class="hint">${x.c} <b>${esc(x.hun.split(',')[0])}</b> · 이 단어에서 <b class="hl">${esc(w[3] || '—')}</b></div>`;
   }
   const left = sess.q.filter(q => q.t === 'c').length;
   $('#app').innerHTML = `${topbar()}
@@ -217,7 +217,7 @@ function nextWrite() {
   const prompt = w ? `${esc(w[0]).replace(x.c, '<span class="hl">□</span>')} <span class="muted">${esc(w[1])}</span>` : '';
   $('#app').innerHTML = `<div class="topbar"><button class="x" data-act="wquit">✕</button>
     <div class="bar"><i style="width:${(wsess.n - wsess.q.length) / wsess.n * 100}%"></i></div></div>
-    <div class="center"><div class="ko">${esc(x.ko)} · ${esc(x.m.join(', '))}</div>
+    <div class="center"><div class="ko">${esc(x.hun)} · ${esc(x.m)}</div>
       <div class="mt" style="font-size:20px">${prompt}</div>
       <div class="chips" style="justify-content:center">${readingChips(core(x.on).concat(core(x.kun)), false)}</div></div>
     <div class="mt" style="position:relative"><canvas class="pad" id="pad"></canvas>
@@ -268,7 +268,7 @@ function sheet(i) {
   const x = K[i], st = S.k[i];
   const bg = document.createElement('div'); bg.className = 'sheet-bg';
   bg.innerHTML = `<div class="sheet"><div class="card center"><div class="muted">${i + 1}번째 · ${x.sc}획 · ${x.g === 8 ? '중학' : x.g + '학년'}</div>
-    <div class="kanji xl" style="font-size:96px">${x.c}</div><div class="ko">${esc(x.ko)}</div><div>${esc(x.m.join(', '))}</div></div>
+    <div class="kanji xl" style="font-size:96px">${x.c}</div><div class="ko">${esc(x.hun)}</div><div>${esc(x.m)}</div></div>
     <div class="card"><b>읽기</b>${readingBlock(x, true)}</div>
     <div class="card"><b>단어</b>${wordsBlock(x)}</div>
     ${st ? `<button class="btn ghost" data-sa="unmark">학습 기록 지우기</button>` : `<button class="btn" data-sa="learn">지금 배우기</button><button class="btn ghost mt" data-sa="known">이미 알아요</button>`}
@@ -291,6 +291,8 @@ function viewSettings() {
     <div class="card"><p class="muted" style="margin-top:0">기록은 이 폰의 브라우저에만 저장돼요. 아이폰은 사파리 메뉴 → '홈 화면에 추가'로 설치해야 기록이 안전하게 유지됩니다.</p>
       <button class="btn ghost" data-act="export">백업 파일 저장</button>
       <label class="btn ghost mt" style="display:block;text-align:center">백업 파일 불러오기<input type="file" id="imp" accept="application/json" hidden></label></div>
+    <h2>다른 앱</h2>
+    <a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="${location.protocol}//${location.hostname}:8005/">Kanji Flow (기존 앱) 열기 →</a>
     <h2>기타</h2>
     <button class="btn ghost" data-act="reset" style="color:var(--warn)">모든 기록 지우기</button>`;
 }

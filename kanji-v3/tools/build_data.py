@@ -16,7 +16,55 @@ import sys
 from collections import defaultdict
 
 DB, OUT = sys.argv[1], sys.argv[2]
+ANKI = sys.argv[3] if len(sys.argv) > 3 else "../kanji-flow-v2/anki_cards.json"
+KM = sys.argv[4] if len(sys.argv) > 4 else "../kanji-flow-v2/static/kanji_meaning.json"
+KO_WORDS = "ko_words.json"   # 한글 뜻이 없는 단어를 손으로 번역해 둔 보충 파일 {단어: 뜻}
 c = sqlite3.connect(DB)
+
+# ── 한글 데이터 (기존 Kanji Flow v2 가 가진 것) ─────────────────
+import os
+_here = os.path.dirname(os.path.abspath(__file__))
+def _load(path):
+    return json.load(open(path if os.path.isabs(path) or os.path.exists(path) else os.path.join(_here, path), encoding="utf-8"))
+anki = _load(ANKI)["cards"]
+kanji_ko = {x["kanji"]: x["back_meaning"] for x in anki if x["type"] == "kanji"}      # '날 생'
+kanji_mean_ko = _load(KM)                                                           # '나다, 살다'
+word_ko = {}
+for x in anki:
+    if x["type"] == "word":
+        items = [t for t in re.split(r"\s*\d+\.\s*", x["back_meaning"]) if t.strip()]
+        word_ko[x["kanji"]] = ", ".join(i.strip() for i in items[:2]) or x["back_meaning"]
+        word_ko[x["kanji"] + "|r"] = x["back_reading"]
+try:
+    extra_ko = _load(KO_WORDS)
+except Exception:
+    extra_ko = {}
+word_ko.update(extra_ko)
+
+
+def shorten(m, limit=18):
+    """'은행, 예금을 자금으로 하여 ...' → 앞의 짧은 뜻만."""
+    out = []
+    for part in re.split(r"\s*[,，]\s*", m):
+        part = re.sub(r"[・.]+$", "", part.strip())
+        if not part:
+            continue
+        if out and len(", ".join(out + [part])) > limit:
+            break
+        out.append(part)
+        if len(", ".join(out)) >= limit:
+            break
+    return ", ".join(out)[:limit + 6] or m[:limit]
+
+
+def mean_from_hun(hun):
+    """'다닐 행, 항렬 항' → '다니다' 대신 훈 부분 '다닐'."""
+    first = hun.split(",")[0].strip()
+    return " ".join(first.split()[:-1]) or first
+
+
+# 사전에 한글 훈음이 없는 한자
+KO_HUN_FIX = {"収": "거둘 수", "塡": "메울 전", "頰": "뺨 협", "枠": "테 틀", "叱": "꾸짖을 질", "剥": "벗길 박"}
 
 KATA = {chr(k): chr(k - 0x60) for k in range(0x30A1, 0x30F7)}
 RENDAKU = {}
@@ -93,6 +141,7 @@ def priority(tags):
 
 
 words_by_kanji = defaultdict(list)
+seen_words = {}
 for kid, idseq, text in c.execute("select ID, idseq, text from Kanji"):
     p = priority(pri.get(kid, []))
     if p is None or not KANJI_RE.search(text):
@@ -107,6 +156,23 @@ for kid, idseq, text in c.execute("select ID, idseq, text from Kanji"):
         continue
     gtxt = ", ".join(re.sub(r"\s*\([^)]*\)", "", g).strip() for g in gl[:2])
     w = dict(w=text, r=hira(rd), m=gtxt, p=p, wt=1.0 / (p + 10) / (1 + 0.3 * max(0, len(text) - 3)))
+    seen_words[text] = w
+    for ch in set(text):
+        if ch in chars:
+            words_by_kanji[ch].append(w)
+
+# JLPT 단어(한글 뜻 있음)도 후보에 넣고, 같은 단어면 한글 뜻을 우선한다
+for text, ko in word_ko.items():
+    if text.endswith("|r") or not KANJI_RE.search(text):
+        continue
+    if text in seen_words:
+        continue
+    rd = hira(word_ko.get(text + "|r", ""))
+    if not HIRA_RE.match(rd) or not re.match(r"^[\u4e00-\u9fff々ぁ-ゟァ-ヺー]+$", text):
+        continue
+    if any(KANJI_RE.match(ch) and ch not in chars for ch in text):
+        continue
+    w = dict(w=text, r=rd, m="", p=20, wt=1.0 / 30 / (1 + 0.3 * max(0, len(text) - 3)))
     for ch in set(text):
         if ch in chars:
             words_by_kanji[ch].append(w)
@@ -158,6 +224,9 @@ def match(word, ch, d):
 out = []
 for ch, d in chars.items():
     ws = words_by_kanji.get(ch, [])
+    for w in ws:
+        if w["w"] in word_ko:
+            w["wt"] *= 3          # 한글 뜻이 있는 단어를 우선 고른다
     score = defaultdict(float)
     for w in ws:
         kind, r = match(w, ch, d)
@@ -196,21 +265,30 @@ for ch, d in chars.items():
         res.sort(key=lambda x: x[1])
         return res
 
+    hun = kanji_ko.get(ch) or KO_HUN_FIX.get(ch, "")
     on_r, kun_r = readings("on", d["on_all"]), readings("kun", d["kun_all"])
-    # 카드용 단어: 핵심 읽기를 하나씩 먼저 덮고, 나머지는 빈도순
+    # 카드용 단어: 한글 뜻이 있는 단어만 쓴다. 핵심 읽기를 하나씩 먼저 덮고, 나머지는 빈도순.
+    # 한글 단어가 2개 미만인 한자만 JMdict 단어로 채우고, 그 뜻은 ko_words.json 에 손으로 번역한다.
     ws.sort(key=lambda w: -w["wt"])
+    kws = [w for w in ws if w["w"] in word_ko and w["kind"]]
     chosen, covered = [], set()
-    for w in ws:
+    for w in kws:
         k = (w["kind"], w["rd"])
-        if w["kind"] and tiers.get(k) == 0 and k not in covered:
+        if tiers.get(k) == 0 and k not in covered:
             chosen.append(w)
             covered.add(k)
-    for w in ws:
+    for w in kws:
         if len(chosen) >= 5:
             break
-        if w not in chosen and w["kind"]:
+        if w not in chosen:
             chosen.append(w)
     chosen = chosen[:5]
+    if len(chosen) < 2:
+        for w in ws:
+            if w["kind"] and w not in chosen:
+                chosen.append(w)
+            if len(chosen) >= 2:
+                break
     word_out = []
     for w in chosen:
         disp = None
@@ -218,10 +296,11 @@ for ch, d in chars.items():
             disp = w["rd"]
         elif w["kind"] == "kun":
             disp = kun_stem(w["rd"])
-        word_out.append([w["w"], w["r"], w["m"], disp or ""])
+        word_out.append([w["w"], w["r"], shorten(word_ko[w["w"]]) if w["w"] in word_ko else w["m"], disp or "", 1 if w["w"] in word_ko else 0])
 
     out.append(dict(
-        c=ch, ko="·".join(dict.fromkeys(d["ko"])), m=d["m"], sc=d["sc"], g=d["g"], f=d["f"],
+        c=ch, ko="·".join(dict.fromkeys(d["ko"])), hun=hun,
+        m=kanji_mean_ko.get(ch) or mean_from_hun(hun), me=d["m"], sc=d["sc"], g=d["g"], f=d["f"],
         on=[x[:2] for x in on_r], kun=[x[:2] for x in kun_r], w=word_out))
 
 # 빈도순(신문 빈도 1~2501), 빈도 없는 글자는 학년순으로 뒤에
