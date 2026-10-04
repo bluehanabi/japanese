@@ -57,6 +57,12 @@ def shorten(m, limit=18):
     return ", ".join(out)[:limit + 6] or m[:limit]
 
 
+def clean_hun(hun):
+    """'어찌 하/꾸짖을 하/멜 하' → '어찌 하' (슬래시 대안 뺌), 쉼표 뜻은 2개까지."""
+    parts = [p.strip().split("/")[0].strip() for p in hun.split(",") if p.strip()]
+    return ", ".join(parts[:2])
+
+
 def mean_from_hun(hun):
     """'다닐 행, 항렬 항' → '다니다' 대신 훈 부분 '다닐'."""
     first = hun.split(",")[0].strip()
@@ -178,6 +184,62 @@ for text, ko in word_ko.items():
             words_by_kanji[ch].append(w)
 
 
+
+# ── 2.5 출처별 빈도 → 단어 점수 → 한자 학습 순서 ─────────────────────
+# 우선순위: 일상 > 애니 > 게임 > 소설 > 신문.  (일상 회화·게임·웹소설 데이터는 이 환경에서 못 받아
+# 지금은 '자막(드라마·애니·영화 대사)'과 '신문'만 쓴다.  tools/data/ 에 출처를 더하고 SOURCES 에 한 줄 추가하면 된다.)
+SUB_WEIGHT = 5.0   # 자막: 일상·애니 대사 (구어체)
+NEWS_WEIGHT = 1.0  # 신문: JMdict news/nf 빈도
+RRF_K = 60
+
+all_words = dict(seen_words)
+for ws_ in words_by_kanji.values():
+    for w_ in ws_:
+        all_words.setdefault(w_["w"], w_)
+
+# 자막 토큰은 어간만 있는 경우가 많다 ('言', '分か') → JMdict 의 '言う', '分かる' 로 되돌린다
+stem_index = defaultdict(list)
+for text, w_ in all_words.items():
+    for k in (1, 2, 3):
+        if len(text) > k and HIRA_RE.match(text[-k:]) and KANJI_RE.search(text[:-k]):
+            stem_index[text[:-k]].append(w_)
+
+
+def resolve(token):
+    if token in all_words:
+        return all_words[token]
+    cands = stem_index.get(token)
+    return min(cands, key=lambda w_: (w_["p"], len(w_["w"]))) if cands else None
+
+
+sub_rank = {}
+with open(os.path.join(_here, "data", "subtitles_ja.txt"), encoding="utf-8") as f:
+    for i, line in enumerate(f):
+        token = line.rsplit(" ", 1)[0]
+        w_ = resolve(token)
+        if w_ is not None and w_["w"] not in sub_rank:
+            sub_rank[w_["w"]] = i
+
+for text, w_ in all_words.items():
+    score = 0.0
+    if text in sub_rank:
+        score += SUB_WEIGHT / (RRF_K + sub_rank[text])
+    if w_["p"] <= 48:                      # nfXX = 신문 빈도 500단어 단위
+        score += NEWS_WEIGHT / (RRF_K + w_["p"] * 500)
+    w_["score"] = score
+    # 길이가 긴 복합어는 약간 감점. 점수가 없는 단어는 아주 낮게(예문 후보로만)
+    pen = 1 + 0.3 * max(0, len(text) - 3)
+    w_["wt"] = (score if score > 0 else w_["wt"] * 1e-3) / pen
+
+# 단어를 점수순으로 훑으며, 처음 만나는 한자를 학습 순서에 넣는다 (그 단어를 읽으려면 필요한 한자부터)
+kanji_order, first_word = [], {}
+for w_ in sorted((w for w in all_words.values() if w["score"] > 0), key=lambda w: -w["score"]):
+    for ch in w_["w"]:
+        if ch in chars and ch not in first_word:
+            first_word[ch] = w_["w"]
+            kanji_order.append(ch)
+print("단어 기준으로 순서가 정해진 한자:", len(kanji_order), "/", len(chars))
+
 # ── 3. 읽기 매칭 ─────────────────────────────────────────
 def on_variants(r):
     v = {r}
@@ -265,7 +327,7 @@ for ch, d in chars.items():
         res.sort(key=lambda x: x[1])
         return res
 
-    hun = kanji_ko.get(ch) or KO_HUN_FIX.get(ch, "")
+    hun = clean_hun(kanji_ko.get(ch) or KO_HUN_FIX.get(ch, ""))
     on_r, kun_r = readings("on", d["on_all"]), readings("kun", d["kun_all"])
     # 카드용 단어: 한글 뜻이 있는 단어만 쓴다. 핵심 읽기를 하나씩 먼저 덮고, 나머지는 빈도순.
     # 한글 단어가 2개 미만인 한자만 JMdict 단어로 채우고, 그 뜻은 ko_words.json 에 손으로 번역한다.
@@ -304,7 +366,10 @@ for ch, d in chars.items():
         on=[x[:2] for x in on_r], kun=[x[:2] for x in kun_r], w=word_out))
 
 # 빈도순(신문 빈도 1~2501), 빈도 없는 글자는 학년순으로 뒤에
-out.sort(key=lambda x: (x["f"] is None, x["f"] or 0, x["g"], x["c"]))
+pos = {ch: i for i, ch in enumerate(kanji_order)}
+out.sort(key=lambda x: (x["c"] not in pos, pos.get(x["c"], 0), x["f"] is None, x["f"] or 0, x["g"], x["c"]))
+for x in out:
+    x["fw"] = first_word.get(x["c"], "")
 for i, x in enumerate(out):
     x["i"] = i
 with open(OUT, "w", encoding="utf-8") as f:

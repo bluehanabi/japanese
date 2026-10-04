@@ -25,3 +25,11 @@ cd kanji-v3/web && python3 -m http.server 8000   # 폰에서 http://<PC 주소>:
 `web/data/kanji.json` 은 `tools/build_data.py` 가 jamdict-data(KANJIDIC2 + JMdict)에서 만들고,
 한글 훈음·뜻은 `kanji-flow-v2/anki_cards.json`, `static/kanji_meaning.json` 을 씁니다.
 한글 뜻이 없던 단어 868개는 `tools/ko_words.json` 에 번역해 두었습니다. 스크립트 상단 주석 참고.
+
+## 한자 학습 순서 (단어 기준)
+한자 글자 빈도가 아니라 **자주 쓰는 단어를 읽는 데 필요한 한자부터** 나옵니다.
+단어를 점수순으로 훑으면서 처음 만나는 한자를 순서에 넣습니다 (`tools/build_data.py` 2.5단계).
+- 목표 우선순위: 일상 회화 > 애니 > 게임 > 소설 > 신문
+- 지금 반영된 출처: 드라마·애니·영화 자막 단어 빈도(가중치 5, `tools/data/subtitles_ja.txt`) + 신문 빈도(가중치 1, JMdict news/nf)
+- 아직 못 받은 출처: 일상 회화(CEJC), 게임(VN), 웹소설 — 이 환경에서 접속이 막혀 있음. 데이터를 `tools/data/` 에 넣고 점수 식에 한 줄 추가하면 반영됨.
+- 출처: 자막은 OpenSubtitles 2018 기반 [hermitdave/FrequencyWords](https://github.com/hermitdave/FrequencyWords) (CC-BY-SA-4.0)

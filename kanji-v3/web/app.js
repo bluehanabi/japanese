@@ -32,10 +32,9 @@ function endingHint(ko) {
   const jong = (syl - 0xAC00) % 28;
   const map = {
     1: 'ㄱ → 〜ク / 〜キ', 4: 'ㄴ → 〜ン', 8: 'ㄹ → 〜ツ / 〜チ', 16: 'ㅁ → 〜ン', 21: 'ㅇ → 〜ウ / 〜イ',
-    0: '받침 없음 → 〜ウ / 〜イ / 〜ア 등',
   };
   const t = map[jong];
-  return t ? `한국음 '${ko}' (${jong === 0 ? '' : '받침 '}${t}) 로 끝나는 음독이 많아요` : '';
+  return t ? `한국음 '${ko}' (받침 ${t}) 로 끝나는 음독이 많아요` : '';
 }
 
 const readingChips = (list, showRare) => list.filter(r => showRare || r[1] < 2)
@@ -153,6 +152,7 @@ function viewIntro(i) {
     <div class="card">
       <b>읽기</b> <span class="muted">초록색이 먼저 외울 핵심</span>
       ${readingBlock(x, !!sess.full)}
+      ${x.fw ? `<div class="hint">📌 자주 쓰는 단어 <b>${esc(x.fw)}</b> 를 읽으려고 지금 배워요</div>` : ''}
       ${hint ? `<div class="hint">💡 ${esc(hint)}</div>` : ''}
       ${!sess.full && (x.on.some(r => r[1] === 2) || x.kun.some(r => r[1] === 2)) ? '<button class="link" data-act="rare">희귀한 읽기까지 보기</button>' : ''}
     </div>
