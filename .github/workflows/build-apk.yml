@@ -1,0 +1,54 @@
+name: Build APK
+
+# Actions 탭에서 수동 실행, 또는 android/ 변경 시 자동 빌드
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/gallant-albattani-XvrfY]
+    paths: ['android/**']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: JDK 17 설정
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 안드로이드 SDK 설정
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 설정
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: 디버그 APK 빌드
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK 를 저장소에 게시 (/download 용)
+        run: |
+          mkdir -p kanji-flow-v2/static/download
+          cp android/app/build/outputs/apk/debug/app-debug.apk kanji-flow-v2/static/download/kanji-flow.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f kanji-flow-v2/static/download/kanji-flow.apk
+          # [skip ci] 안 붙임: 이 커밋이 deploy.yml 을 돌려 새 APK 를 맥(/download)에 반영.
+          # build-apk.yml 은 android/** 변경에만 돌아서 재빌드 루프는 안 생김.
+          git commit -m "Build Kanji Flow APK" || { echo "변경 없음"; exit 0; }
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: APK 아티팩트 업로드 (백업)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanji-flow-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")"
 
-BRANCH="${BRANCH:-claude/pensive-ramanujan-n57KJ}"
+BRANCH="${BRANCH:-claude/gallant-albattani-XvrfY}"
 
 echo "[deploy] 최신 코드 받는 중 (브랜치: $BRANCH)"
 git fetch origin "$BRANCH"
@@ -17,5 +17,5 @@ bash kanji-flow-v2/serve.sh --bg
 
 echo ""
 echo "[deploy] 완료!"
-echo "  내부망 접속:  http://192.168.10.35:8005"
-echo "  외부망 접속:  http://211.109.91.64:8005"
+echo "  내부망 접속:  http://192.168.10.35:8005 (새 앱) / :8006 (기존 앱)"
+echo "  외부망 접속:  http://211.109.91.64:8005 (새 앱) / :8006 (기존 앱)"

@@ -17,11 +17,15 @@ const State = {
     flipped: false,     // 카드 뒤집기 여부
     sessionCorrect: 0,  // 세션 정답 수
     sessionTotal: 0,    // 세션 총 카드 수
+    hardFronts: [],     // 이번 세션에서 어려워한(몰랐음/힘들었어) 카드
   },
   vocab: {
-    filter: "all",
-    allCards: [],
-    displayCards: [],
+    filter: "rec",
+    page: 1,
+    loading: false,
+    done: false,
+    cards: [],
+    search: "",
   },
   writing: {
     cards: [],
@@ -29,6 +33,9 @@ const State = {
     canvas: null,
     showGuide: true,
     showGrid: true,
+    mode: "trace",   // 'trace'(따라쓰기) / 'recall'(외워쓰기)
+    srs: false,
+    correct: 0,
   },
   quiz: {
     questions: [],
@@ -39,15 +46,24 @@ const State = {
     count: 15,
   },
   lyrics: {
-    foundIds: [],
+    foundIds: [], foundCards: [], lastData: null, currentId: null,
   },
+  sentence: {
+    items: [], index: 0, direction: "jp2kr",
+    target: [], answer: [], bank: [], answered: false, correct: 0,
+  },
+  listen: { items: [], idx: 0 },
+  chat: { history: [], busy: false },
   settings: {
     daily_new_cards: 10,
     study_mode: "both",
+    study_order: "jlpt",
     show_reading_on_front: "0",
     shuffle_study: "1",
     active_levels: "N5,N4",
-    active_categories: "자연,사람,행동,감정,일상,지식",
+    active_kanken: "10급,9급,8급,7급",
+    active_categories: "한자,명사,동사,형용사,부사,기타,문법",
+    gemini_api_key: "",
   },
 };
 
@@ -57,9 +73,223 @@ const State = {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setGreeting();
+  document.getElementById("vocab-view").addEventListener("scroll", onVocabScroll);
+  loadReadingFreq();
+  loadConjugation();
+  flushReviewOutbox();                                  // 오프라인 중 쌓인 평가 동기화
+  window.addEventListener("online", flushReviewOutbox); // 연결 복구 시 재동기화
   await loadHome();
   await loadSettings();
+
+  // 마지막으로 보던 탭 복원 (앱을 껐다 켜도 그 탭 유지)
+  const lastTab = localStorage.getItem("lastTab");
+  if (lastTab && lastTab !== "home" &&
+      ["vocab", "stats", "lyrics", "translate", "ai", "settings", "path"].includes(lastTab)) {
+    showView(lastTab);
+  }
 });
+
+// 저장된 가사 목록 (서버) 불러와 오버레이 리스트로 표시 + 항목 배열 반환
+async function loadSavedLyrics() {
+  const wrap = document.getElementById("saved-lyrics-list");
+  const data = await apiFetch("/api/lyrics/list");
+  const items = data.items || [];
+  wrap.innerHTML = items.length
+    ? items.map(it => `
+        <div class="saved-row">
+          <button class="saved-row-open" onclick="openSavedLyric(${it.id})">📄 ${escapeHtml(it.title)}</button>
+          <button class="saved-row-del" onclick="confirmDeleteLyric(${it.id})">🗑</button>
+        </div>`).join("")
+    : `<div style="color:var(--text-muted);font-size:13px;padding:24px;text-align:center">저장된 가사가 없어요.<br>아래 '새 가사 추가'로 만들어 보세요.</div>`;
+  return items;
+}
+
+// 가사 탭 진입: 마지막에 보던 노래(없으면 가장 최근)를 불러온다
+async function enterLyricsView() {
+  const items = await loadSavedLyrics();
+  if (!items.length) { newLyric(); return; }
+  const lastId = parseInt(localStorage.getItem("lastLyricId") || "0", 10);
+  const target = items.find(it => it.id === lastId) || items[0];
+  openSavedLyric(target.id);
+}
+
+function openLyricsList() {
+  loadSavedLyrics();
+  document.getElementById("lyrics-list-overlay").classList.add("open");
+}
+function closeLyricsList() {
+  document.getElementById("lyrics-list-overlay").classList.remove("open");
+}
+
+// 새 가사 입력 (빈 편집기)
+function newLyric() {
+  State.lyrics.currentId = null;
+  State.lyrics.lastData = null;
+  document.getElementById("lyrics-title").value = "";
+  document.getElementById("lyrics-input").value = "";
+  document.getElementById("lyrics-results").innerHTML = "";
+  showLyricsEditor(true);
+}
+function confirmDeleteLyric(id) {
+  if (confirm("이 가사를 삭제할까요?")) deleteSavedLyric(id);
+}
+
+// ── 한자 읽기 사용 비율 (음독/훈독, 정적 데이터) ──────────
+var READING_FREQ = {};
+async function loadReadingFreq() {
+  try {
+    const res = await fetch("/reading_freq.json", { cache: "force-cache" });
+    READING_FREQ = await res.json();
+  } catch (e) { READING_FREQ = {}; }
+}
+
+// 빈도순 정렬 + 5% 미만은 노이즈로 제외 (한자 읽기 표시 공통 규칙)
+const READ_MIN_PCT = 5;
+function _topReadings(front) {
+  const rows = READING_FREQ[front];
+  if (!rows || !rows.length) return [];
+  const filtered = rows.filter(x => x.p >= READ_MIN_PCT).sort((a, b) => b.p - a.p);
+  return filtered.length ? filtered : rows.slice().sort((a, b) => b.p - a.p).slice(0, 2);
+}
+
+// 한자 한 글자의 읽기 비율 HTML (데이터 없으면 "")
+function readingFreqHtml(front) {
+  const top = _topReadings(front);
+  if (!top.length) return "";
+  const body = top.map(x => `
+    <div class="rf-row">
+      <span class="rf-type ${x.t === "음" ? "on" : "kun"}">${x.t}</span>
+      <span class="rf-read">${escapeHtml(x.r)}</span>
+      <span class="rf-barwrap"><span class="rf-bar" style="width:${x.p}%"></span></span>
+      <span class="rf-pct">${x.p}%</span>
+    </div>`).join("");
+  return `<div class="rf-wrap"><div class="rf-title">읽기 사용 비율 <span>(대략)</span></div>${body}</div>`;
+}
+
+// 쓰기 연습용 한 줄: "(음) セイ 43% · (훈) い（きる） 14% · …" (빈도순, 5%↑만)
+function readingFreqLine(front) {
+  const top = _topReadings(front);
+  if (!top.length) return "";
+  return top.map(x => `(${x.t}) ${x.r} ${x.p}%`).join("  ·  ");
+}
+
+// 카드 표시용 읽기: 한자는 빈도순 상위만, 없으면 별표(*) 항목 제거. 그 외는 원본.
+function displayReading(card) {
+  if (!card) return "";
+  if (card.type === "kanji") {
+    const top = _topReadings(card.front);
+    if (top.length) return top.map(x => `(${x.t}) ${x.r}`).join("  ·  ");
+    return (card.back_reading || "").split(/\s*\/\s*/).map(sec => {
+      const m = sec.match(/^([^:]+:)\s*(.+)$/);
+      if (!m) return sec;
+      const items = m[2].split("・").map(t => t.trim()).filter(t => t && !t.startsWith("*"));
+      return items.length ? `${m[1]} ${items.join("・")}` : "";
+    }).filter(Boolean).join(" / ");
+  }
+  return card.back_reading || "";
+}
+
+// 뜻에 섞인 일본어 인용(‘…’ 안의 가나·한자 등) 정리. 정리 후 조사만 남으면 원본 유지.
+function _cleanJpCite(m, fallback) {
+  m = m.replace(/\s*[·・]\s*/g, ", ");                  // 구분점 → 쉼표
+  if (!/[぀-ゟァ-ヿ㐀-鿿]/.test(m)) return m;
+  const cleaned = m
+    .replace(/[‘'“"「『][^’'”"」』]*[’'”"」』]/g, "")    // 따옴표 인용 통째로 제거
+    .replace(/[぀-ゟァ-ヿ㐀-鿿々〆]+/g, "")              // 남은 가나·한자 런 제거
+    .replace(/\s*,\s*(?=,|$)/g, "").replace(/^[\s,]+/, "")
+    .replace(/\s{2,}/g, " ").trim();
+  if (cleaned.length >= 2 && !/^(의|을|를|은|는|이|가|에|로|와|과|도|만)(\s|,|$)/.test(cleaned)) return cleaned;
+  return _cleanJpCite0(fallback);   // 부실하면 원본을 구분점만 정리해 유지
+}
+function _cleanJpCite0(m) { return String(m).replace(/\s*[·・]\s*/g, ", "); }
+
+// 문법 설명형(메타) 뜻 판별: "~가리키는 말/모양", 대명사·지시 등 사전 설명은 실사용 뜻이 아님
+function _isMetaSense(x) {
+  return x.length > 9
+    || /(가리키|나타내|이르는|대명사|지시|준말|압축|말씨)/.test(x)
+    || (/(말|모양|것|일|꼴)$/.test(x) && x.length > 4);
+}
+
+// 단어 의미 정리: 사전에서 긁어온 다의어/문법설명/일본어 인용을 학습용 핵심뜻으로 압축.
+//  • "1. … 2. … 3. …" → 문법 설명형이 아닌 '첫 구체적 뜻' 우선, 없으면 가장 짧은 뜻
+//    (예: ここ "1.근칭의 지시대명사 2.여기" → "여기")
+//  • 가운뎃점(·, ・)은 쉼표로, 뜻에 섞인 일본어 인용은 제거
+//  • 번호 없는 백과사전식 긴 문장은 첫 구절만
+function shortMeaning(s) {
+  if (!s) return "";
+  s = String(s).trim();
+  let senses = s.split(/\s*\d+\.\s*/).map(x => x.trim()).filter(Boolean);
+  if (senses.length <= 1) {
+    let m = senses[0] || s;
+    if (m.length > 22) m = m.split(/[.。]/)[0].trim();   // 긴 설명문 → 첫 구절
+    return _cleanJpCite(m, m);
+  }
+  senses = senses.map(x => x.replace(/\s*[·・]\s*/g, ", "));
+  let pick = senses.find(x => !_isMetaSense(x))
+          || senses.slice().sort((a, b) => a.length - b.length)[0];
+  return _cleanJpCite(pick, pick);
+}
+
+// 가사 입력/추출 영역(편집기) 표시 토글
+function showLyricsEditor(show) {
+  document.getElementById("lyrics-editor").style.display = show ? "" : "none";
+}
+
+async function openSavedLyric(id) {
+  const it = await apiFetch(`/api/lyrics/item/${id}`);
+  if (it.error) { showToast("불러오기 실패"); return; }
+  State.lyrics.currentId = it.id;
+  localStorage.setItem("lastLyricId", it.id);   // 다음 진입 때 이 노래 복원
+  closeLyricsList();                            // 목록에서 열었으면 닫기
+  document.getElementById("lyrics-title").value = it.title || "";
+  document.getElementById("lyrics-input").value = it.text || "";
+  showLyricsEditor(false);   // 저장된 가사는 연습 모드로
+  const results = document.getElementById("lyrics-results");
+
+  // 이미 추출된 데이터가 있으면 바로 연습 버튼
+  if (it.data && it.data.found) {
+    State.lyrics.lastData = it.data;
+    renderLyricsResults(it.data);
+    return;
+  }
+  // 추출 데이터가 없으면 저장된 가사로 즉시 자동 추출
+  if (it.text) {
+    results.innerHTML = '<div class="spinner"></div>';
+    const data = await apiFetch("/api/lyrics/analyze", "POST", { text: it.text });
+    if (data && data.found) {
+      State.lyrics.lastData = data;
+      renderLyricsResults(data);
+      // 결과를 저장본에 백필 → 다음부턴 즉시 표시
+      apiFetch("/api/lyrics/save", "POST", { id: it.id, title: it.title || "제목 없음", text: it.text, data });
+      return;
+    }
+  }
+  // 추출 결과가 없으면 편집기에서 직접
+  showLyricsEditor(true);
+  results.innerHTML = "";
+}
+
+// 저장된 가사 보기에서 '수정' → 편집기를 다시 펼친다 (연습 버튼은 유지)
+function editLyric() {
+  showLyricsEditor(true);
+  if (State.lyrics.lastData) renderLyricsResults(State.lyrics.lastData);
+  document.getElementById("lyrics-input").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function deleteSavedLyric(id) {
+  await apiFetch(`/api/lyrics/delete/${id}`, "POST", {});
+  if (State.lyrics.currentId === id) newLyric();   // 현재 보던 걸 지우면 새 입력으로
+  loadSavedLyrics();   // 목록 갱신 (오버레이 유지)
+}
+
+async function saveLyrics() {
+  const title = document.getElementById("lyrics-title").value.trim() || "제목 없음";
+  const text = document.getElementById("lyrics-input").value.trim();
+  if (!text) { showToast("가사를 입력해 주세요"); return; }
+  const res = await apiFetch("/api/lyrics/save", "POST",
+    { id: State.lyrics.currentId || null, title, text, data: State.lyrics.lastData || null });
+  if (res.id) { State.lyrics.currentId = res.id; localStorage.setItem("lastLyricId", res.id); showToast("💾 저장됐어요"); loadSavedLyrics(); }
+}
 
 function setGreeting() {
   const h = new Date().getHours();
@@ -92,15 +322,39 @@ function showView(name) {
 
   State.currentView = name;
 
+  // 메인 탭이면 마지막 탭으로 기억 (앱 재실행/새로고침 시 복원)
+  if (["home", "vocab", "stats", "lyrics", "translate", "ai", "settings", "path"].includes(name)) {
+    localStorage.setItem("lastTab", name);
+  }
+
   // 뷰별 데이터 로드
+  if (name === "path")     loadPath();
   if (name === "vocab")    loadVocab();
   if (name === "stats")    loadStats();
   if (name === "settings") loadSettingsUI();
+  if (name === "lyrics")   enterLyricsView();
 
   // 학습/퀴즈 중이면 내비 숨기기
   document.getElementById("nav").style.display =
-    (name === "study" || name === "quiz") ? "none" : "flex";
+    (["study", "quiz", "sentence", "ai-chat", "conj", "listen", "lesson"].includes(name)) ? "none" : "flex";
 }
+
+// 안드로이드 뒤로(제스처/버튼) → 앱 내비게이션과 연결 (네이티브에서 호출)
+function appBack() {
+  // 1) 열린 오버레이부터 닫기
+  for (const id of ["card-detail-overlay", "translate-history-overlay", "lyrics-list-overlay", "ai-tool-overlay", "ai-overlay", "writing-overlay", "quiz-setup-overlay"]) {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains("open")) { el.classList.remove("open"); return "handled"; }
+  }
+  // 2) 홈이 아니면 홈으로
+  if (State.currentView && State.currentView !== "home") {
+    showView("home");
+    loadHome();
+    return "handled";
+  }
+  return "exit";   // 홈이면 앱을 백그라운드로
+}
+window.appBack = appBack;
 
 // ══════════════════════════════════════════════════════════
 //  홈 대시보드
@@ -119,25 +373,17 @@ async function loadHome() {
     document.getElementById("home-done").textContent = stats.today_reviewed;
     document.getElementById("home-streak").textContent = stats.streak;
 
-    // 학습 시작 버튼
+    // 복습하기 버튼 — 여태 학습한 카드를 멀티스텝 레슨으로 (복습 예정 수 표시)
     const startBtn = document.getElementById("start-study-btn");
-    if (today.total_due === 0) {
-      startBtn.textContent = "✅ 오늘 학습 완료!";
-      startBtn.disabled = true;
-    } else {
-      startBtn.innerHTML = `
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
-          <path d="M5 3l14 9-14 9V3z" fill="white"/>
-        </svg>
-        지금 바로 학습 시작 (${today.total_due}개)`;
-      startBtn.disabled = false;
-    }
+    startBtn.disabled = false;
+    const dueTxt = today.review_count > 0 ? ` (${today.review_count}개 예정)` : "";
+    startBtn.innerHTML = `🔁 복습하기${dueTxt}`;
+    startBtn.onclick = startReview;
 
-    // 상태 분포 바
-    const total = stats.total_cards || 1;
-    const nNew = stats.new;
-    const nLearning = stats.learning;
-    const nMastered = stats.mastered;
+    // 상태 분포 바 — 선택한 범위(레벨·급수·종류) 기준
+    const nNew = stats.scope_new ?? stats.new;
+    const nLearning = stats.scope_learning ?? stats.learning;
+    const nMastered = stats.scope_mastered ?? stats.mastered;
 
     document.getElementById("bar-new").style.flex      = nNew;
     document.getElementById("bar-learning").style.flex = nLearning;
@@ -160,29 +406,180 @@ async function loadHome() {
 //  학습 세션
 // ══════════════════════════════════════════════════════════
 
-async function startStudy() {
+// ── 오프라인 복원력: 서버가 잠깐 죽어도 저장된 카드로 학습, 평가는 큐에 모아 복구 시 동기화 ──
+function _ok(res) { return res && Object.keys(res).length > 0; }
+
+async function fetchTodayQueue(extra) {
+  const data = await apiFetch("/api/today" + (extra ? "?extra=1" : "")) || {};
+  if (data.review_cards || data.new_cards) {
+    try { localStorage.setItem("todayCache", JSON.stringify(data)); } catch (e) {}
+    return data;
+  }
+  // 서버 불가 → 마지막으로 저장된 카드로 학습
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("todayCache") || "null"); } catch (e) {}
+  if (cached && (cached.review_cards || cached.new_cards)) {
+    showToast("오프라인: 저장된 카드로 학습합니다 📦");
+    return cached;
+  }
+  return data;
+}
+
+function queueReview(card_id, answer) {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem("reviewOutbox") || "[]"); } catch (e) {}
+  q.push({ card_id, answer });
+  try { localStorage.setItem("reviewOutbox", JSON.stringify(q)); } catch (e) {}
+}
+
+async function flushReviewOutbox() {
+  let q = [];
+  try { q = JSON.parse(localStorage.getItem("reviewOutbox") || "[]"); } catch (e) { return; }
+  if (!q.length) return;
+  const remain = [];
+  for (const it of q) {
+    const res = await apiFetch("/api/review", "POST", it);
+    if (!_ok(res)) remain.push(it);
+  }
+  try { localStorage.setItem("reviewOutbox", JSON.stringify(remain)); } catch (e) {}
+  if (remain.length === 0) showToast(`오프라인 학습 ${q.length}건 동기화됐어요 ✅`);
+}
+
+async function startStudy(extra = false) {
+  let data = await fetchTodayQueue(extra);
+  let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  // 오늘치를 끝냈으면 자동으로 추가 학습으로 전환
+  if (queue.length === 0 && !extra) {
+    extra = true;
+    data = await fetchTodayQueue(true);
+    queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  }
+  if (queue.length === 0) {
+    showToast("더 학습할 카드가 없어요 🎉");
+    return;
+  }
+
   showView("study");
   document.getElementById("study-complete").style.display = "none";
   document.getElementById("flashcard-scene").style.display = "block";
   // 평가 버튼은 .visible 클래스로만 제어 (인라인 display 를 쓰면 .visible 이 무시됨)
   document.getElementById("rating-wrap").classList.remove("visible");
 
-  const data = await apiFetch("/api/today") || {};
-  const review_cards = data.review_cards || [];
-  const new_cards = data.new_cards || [];
-
   // 복습 카드 먼저, 그 다음 신규
-  State.study.queue = [...review_cards, ...new_cards];
+  State.study.queue = queue;
+  State.study.extra = extra;
+  State.study.unified = false;
   State.study.index = 0;
   State.study.sessionCorrect = 0;
   State.study.sessionTotal = 0;
-
-  if (State.study.queue.length === 0) {
-    showStudyComplete();
-    return;
-  }
+  State.study.hardFronts = [];
 
   showCard(0);
+}
+
+// 통합 학습 — 카드마다 플래시카드/사지선다를 자동으로 섞어 연속 출제
+async function startUnified(extra = false) {
+  let data = await fetchTodayQueue(extra);
+  let queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  if (queue.length === 0 && !extra) {
+    extra = true;
+    data = await fetchTodayQueue(true);
+    queue = [...(data.review_cards || []), ...(data.new_cards || [])];
+  }
+  if (queue.length === 0) {
+    showToast("더 학습할 카드가 없어요 🎉");
+    return;
+  }
+  showView("study");
+  document.getElementById("study-complete").style.display = "none";
+  State.study.queue = queue;
+  State.study.extra = extra;
+  State.study.unified = true;
+  State.study.index = 0;
+  State.study.sessionCorrect = 0;
+  State.study.sessionTotal = 0;
+  State.study.hardFronts = [];
+  showUnifiedStep(0);
+}
+
+function studyNext() {
+  if (State.study.unified) showUnifiedStep(State.study.index + 1);
+  else showCard(State.study.index + 1);
+}
+
+function showUnifiedStep(i) {
+  const q = State.study.queue;
+  if (i >= q.length) { showStudyComplete(); return; }
+  // 보기가 충분하면 50% 확률로 사지선다, 아니면 플래시카드
+  const fmt = (q.length >= 4 && Math.random() < 0.5) ? "choice" : "flash";
+  if (fmt === "flash") {
+    document.getElementById("uni-choice").style.display = "none";
+    document.getElementById("flashcard-scene").style.display = "block";
+    showCard(i);
+  } else {
+    showUniChoice(i);
+  }
+}
+
+const TYPE_LABEL_U = { kanji: "한자", word: "단어", grammar: "문법" };
+
+function showUniChoice(i) {
+  const q = State.study.queue;
+  const card = q[i];
+  State.study.index = i;
+
+  document.getElementById("study-progress").style.width = Math.round(i / q.length * 100) + "%";
+  document.getElementById("study-progress-text").textContent = `${i} / ${q.length}`;
+  const tb = document.getElementById("study-type-badge");
+  tb.textContent = TYPE_LABEL_U[card.type] || "단어";
+  tb.className = `card-type-badge badge-${card.type}`;
+
+  document.getElementById("flashcard-scene").style.display = "none";
+  document.getElementById("rating-wrap").classList.remove("visible");
+  document.getElementById("uni-choice").style.display = "flex";
+
+  const dir = Math.random() < 0.5 ? "f2m" : "m2f";
+  let prompt, answer, pool, dirLabel;
+  if (dir === "f2m") {
+    prompt = card.front; answer = card.back_meaning;
+    pool = q.map(c => c.back_meaning); dirLabel = "뜻을 고르세요";
+  } else {
+    prompt = card.back_meaning; answer = card.front;
+    pool = q.map(c => c.front); dirLabel = "알맞은 한자/단어를 고르세요";
+  }
+  document.getElementById("uni-choice-dir").textContent = dirLabel;
+  const promptEl = document.getElementById("uni-choice-prompt");
+  promptEl.textContent = prompt;
+  promptEl.classList.toggle("small", prompt.length > 6);
+
+  const distract = [...new Set(pool.filter(x => x && x !== answer))];
+  shuffleArr(distract);
+  const opts = shuffleArr([answer, ...distract.slice(0, 3)]);
+  State.study.uniOpts = opts;
+  State.study.uniAnswer = answer;
+  State.study.uniAnswered = false;
+  document.getElementById("uni-choice-options").innerHTML = opts.map((o, idx) =>
+    `<button class="quiz-option" onclick="answerUniChoice(this, ${idx})">${escapeHtml(o)}</button>`).join("");
+}
+
+function answerUniChoice(btn, idx) {
+  if (State.study.uniAnswered) return;
+  State.study.uniAnswered = true;
+  const card = State.study.queue[State.study.index];
+  const correct = State.study.uniOpts[idx] === State.study.uniAnswer;
+
+  document.querySelectorAll("#uni-choice-options .quiz-option").forEach((b, j) => {
+    b.classList.add("disabled");
+    if (State.study.uniOpts[j] === State.study.uniAnswer) b.classList.add("correct");
+  });
+  if (!correct) btn.classList.add("wrong");
+
+  const answer = correct ? "good" : "again";
+  State.study.sessionTotal++;
+  if (correct) State.study.sessionCorrect++; else State.study.hardFronts.push(card.front);
+  apiFetch("/api/review", "POST", { card_id: card.id, answer });
+  speak(cardTTSText(card));
+  setTimeout(() => showUnifiedStep(State.study.index + 1), correct ? 750 : 1400);
 }
 
 function showCard(index) {
@@ -191,6 +588,10 @@ function showCard(index) {
     showStudyComplete();
     return;
   }
+
+  // 통합 학습의 사지선다 패널 숨기고 플래시카드 표시
+  document.getElementById("uni-choice").style.display = "none";
+  document.getElementById("flashcard-scene").style.display = "block";
 
   State.study.index = index;
   State.study.flipped = false;
@@ -203,31 +604,65 @@ function showCard(index) {
   document.getElementById("study-progress").style.width = pct + "%";
   document.getElementById("study-progress-text").textContent = `${index} / ${total}`;
 
+  const TYPE_LABEL = { kanji: "한자", word: "단어", grammar: "문법" };
+
   // 카드 타입 배지
   const typeBadge = document.getElementById("study-type-badge");
-  typeBadge.textContent = card.type === "kanji" ? "한자" : "단어";
-  typeBadge.className = `card-type-badge ${card.type === "kanji" ? "badge-kanji" : "badge-word"}`;
+  typeBadge.textContent = TYPE_LABEL[card.type] || "단어";
+  typeBadge.className = `card-type-badge badge-${card.type}`;
 
-  // 레벨 배지 (n5 ~ n1 동적 뱃지 색상 매핑)
+  // 레벨 배지: 한자는 漢検 급수, 그 외는 JLPT 레벨
   const levelBadge = document.getElementById("front-level-badge");
-  levelBadge.textContent = card.jlpt_level;
-  levelBadge.className = `card-type-badge badge-${card.jlpt_level.toLowerCase()}`;
+  if (card.type === "kanji" && card.sub_level) {
+    levelBadge.textContent = "漢検 " + card.sub_level;
+    levelBadge.className = "card-type-badge badge-kanken";
+  } else {
+    levelBadge.textContent = card.jlpt_level;
+    levelBadge.className = `card-type-badge badge-${card.jlpt_level.toLowerCase()}`;
+  }
 
-  // 앞면 텍스트
+  // 앞면 텍스트 (단어·문법은 글자가 길어 작게)
   const frontText = document.getElementById("card-front-text");
   frontText.textContent = card.front;
-  frontText.className = `card-main-text${card.type === "word" ? " word-text" : ""}`;
+  const longType = card.type === "word" ? " word-text" : card.type === "grammar" ? " grammar-text" : "";
+  frontText.className = `card-main-text${longType}`;
+
+  // 설정: 앞면에 발음(읽기) 표시
+  const frontReading = document.getElementById("card-front-reading");
+  if (State.settings.show_reading_on_front === "1" && card.back_reading) {
+    frontReading.textContent = card.back_reading;
+    frontReading.style.display = "block";
+  } else {
+    frontReading.style.display = "none";
+  }
 
   // 뒷면 준비
-  document.getElementById("card-back-kanji").textContent =
-    card.type === "word" ? card.front : card.front;
+  const backKanji = document.getElementById("card-back-kanji");
+  backKanji.textContent = card.front;
+  backKanji.className = `card-back-kanji${card.type === "grammar" ? " grammar-text" : ""}`;
   document.getElementById("card-back-meaning").textContent = card.back_meaning;
-  document.getElementById("card-back-reading").textContent = card.back_reading;
 
-  // 파생 단어 목록 (한자 카드만)
+  const backReading = document.getElementById("card-back-reading");
+  const rText = displayReading(card);
+  backReading.textContent = rText;
+  backReading.style.display = rText ? "" : "none";
+
+  // 쓰기 연습 버튼은 한자/단어만 (문법 제외)
+  document.getElementById("card-write-btn").style.display =
+    card.type === "grammar" ? "none" : "";
+
+  // 뒷면 부가 정보: 한자=파생단어 / 문법=예문
   const wordsEl = document.getElementById("card-back-words");
   wordsEl.innerHTML = "";
-  if (card.type === "kanji" && card.extra_info && Array.isArray(card.extra_info)) {
+  if (card.type === "grammar" && card.extra_info && Array.isArray(card.extra_info.examples)) {
+    card.extra_info.examples.forEach(ex => {
+      wordsEl.innerHTML += `
+        <div class="example-item">
+          <div class="ex-jp">${escapeHtml(ex.jp)}</div>
+          <div class="ex-kr">${escapeHtml(ex.kr)}</div>
+        </div>`;
+    });
+  } else if (card.type === "kanji" && card.extra_info && Array.isArray(card.extra_info)) {
     card.extra_info.forEach(w => {
       wordsEl.innerHTML += `
         <div class="word-item">
@@ -238,9 +673,14 @@ function showCard(index) {
     });
   }
 
-  // 카드 뒤집기 초기화
+  // 카드 뒤집기 초기화 — 애니메이션 없이 즉시 앞면으로 (다음 카드 정답이 회전 중에 비치는 것 방지)
   const flashcard = document.getElementById("flashcard");
-  flashcard.classList.remove("flipped");
+  if (flashcard.classList.contains("flipped")) {
+    flashcard.style.transition = "none";
+    flashcard.classList.remove("flipped");
+    void flashcard.offsetWidth;        // 강제 reflow로 transition:none 적용
+    flashcard.style.transition = "";
+  }
   document.getElementById("rating-wrap").classList.remove("visible");
 
   // 예상 간격 표시
@@ -253,6 +693,7 @@ function flipCard() {
 
   document.getElementById("flashcard").classList.add("flipped");
   document.getElementById("rating-wrap").classList.add("visible");
+  speakCurrentCard();   // 카드를 뒤집으면 발음 자동 재생
 }
 
 function fmtDays(d) {
@@ -272,12 +713,14 @@ async function submitRating(answer) {
   const card = State.study.queue[State.study.index];
   State.study.sessionTotal++;
   if (answer === "good" || answer === "easy") State.study.sessionCorrect++;
+  else State.study.hardFronts.push(card.front);   // 몰랐음/힘들었어 → 약점 기록
 
-  // API 호출
-  apiFetch("/api/review", "POST", { card_id: card.id, answer });
+  // API 호출 (실패하면 오프라인 큐에 저장 → 복구 시 자동 동기화)
+  apiFetch("/api/review", "POST", { card_id: card.id, answer })
+    .then(res => { if (!_ok(res)) queueReview(card.id, answer); });
 
-  // 다음 카드로
-  showCard(State.study.index + 1);
+  // 다음 (통합이면 형식 섞어서, 아니면 다음 카드)
+  studyNext();
 }
 
 function showStudyComplete() {
@@ -294,6 +737,17 @@ function showStudyComplete() {
   document.getElementById("complete-correct").textContent  = correct;
   document.getElementById("complete-accuracy").textContent = pct + "%";
 
+  // 경로 유닛이면 완료 버튼을 '다음 유닛 / 경로로'로 바꾼다
+  const more = document.getElementById("complete-more"), home = document.getElementById("complete-home");
+  if (State.study.returnTo === "path") {
+    const nxt = (State.study.unitIdx ?? -1) + 1;
+    more.textContent = "▶ 다음 유닛"; more.onclick = () => startPathUnit(nxt);
+    home.textContent = "🗺️ 경로로"; home.onclick = () => { State.study.returnTo = null; showView("path"); loadPath(); };
+  } else {
+    more.textContent = "🔄 더 학습하기"; more.onclick = () => startStudy(true);
+    home.textContent = "홈으로 돌아가기"; home.onclick = () => { showView("home"); loadHome(); };
+  }
+
   const subs = [
     "훌륭합니다! 매일 조금씩 쌓이는 게 실력이에요 💪",
     "오늘도 한자 하나 더 마스터! 🎌",
@@ -303,68 +757,468 @@ function showStudyComplete() {
   document.getElementById("complete-sub").textContent = subs[Math.floor(Math.random() * subs.length)];
 
   loadHome();
+  saveSessionDigest(total, correct);   // 세션 종료 → 백데이터 저장 + AI 요약
+}
+
+// 세션 종료 시: 기록 저장 + AI 요약 (백데이터)
+async function saveSessionDigest(total, correct) {
+  const aiEl = document.getElementById("complete-ai");
+  aiEl.style.display = "none";
+  if (total === 0) return;
+
+  // 다음 '문장 연습'이 즉시 뜨도록 백그라운드로 문장 미리 생성 (대기 안 함)
+  apiFetch("/api/ai/pregenerate", "POST", {});
+
+  const hasKey = !!(State.settings.gemini_api_key || "").trim();
+  if (hasKey) {
+    aiEl.style.display = "block";
+    aiEl.innerHTML = '<div class="spinner"></div>';
+  }
+  const data = await apiFetch("/api/ai/session_summary", "POST", {
+    studied: total, correct: correct,
+    hard_fronts: State.study.hardFronts,
+  });
+  if (data.summary) {
+    aiEl.style.display = "block";
+    aiEl.innerHTML = `<div class="complete-ai-title">🤖 오늘의 AI 코치</div>
+      <div class="complete-ai-text">${escapeHtml(data.summary).replace(/\n/g, "<br>")}</div>`;
+  } else {
+    aiEl.style.display = "none";   // 키 없거나 실패 시 조용히 숨김
+  }
 }
 
 function endStudy() {
+  if (State.study.returnTo === "path") { State.study.returnTo = null; showView("path"); loadPath(); return; }
   showView("home");
+}
+
+// ══════════════════════════════════════════════════════════
+//  학습 경로 (섹션 → 챕터 → 유닛)
+// ══════════════════════════════════════════════════════════
+var PATH_DATA = null, PATH_UNITS = [];
+async function loadPathData() {
+  if (PATH_DATA) return PATH_DATA;
+  try {
+    PATH_DATA = await (await fetch("/path.json", { cache: "force-cache" })).json();
+    PATH_UNITS = [];
+    for (const sec of PATH_DATA.sections) for (const u of sec.units) PATH_UNITS.push(u);
+  } catch (e) { PATH_DATA = { sections: [] }; }
+  return PATH_DATA;
+}
+
+async function loadPath() {
+  const wrap = document.getElementById("path-list");
+  wrap.innerHTML = '<div class="spinner"></div>';
+  await loadPathData();
+  const st = await apiFetch("/api/path/status");
+  const status = st.status || [], secs = st.sections || [];
+  const doneCnt = status.filter(s => s >= 1).length;
+  document.getElementById("path-sub").textContent =
+    `완료 ${doneCnt} / ${status.length} 유닛 · 자주 쓰는 것부터`;
+  let gi = 0, html = "";
+  secs.forEach(sec => {
+    const start = gi, secStatus = status.slice(gi, gi + sec.units);
+    const secDone = secStatus.filter(s => s >= 1).length;
+    html += `<div class="path-section"><div class="path-sec-head"><span>${escapeHtml(sec.title)}</span>` +
+            `<span class="path-sec-prog">${secDone}/${sec.units}</span></div>`;
+    for (let c = 0; c < sec.units; c += 8) {
+      html += `<div class="path-chapter">`;
+      for (let u = c; u < Math.min(c + 8, sec.units); u++) {
+        const idx = start + u, s = status[idx] || 0;
+        const unlocked = idx === 0 || (status[idx - 1] || 0) >= 1;
+        const clickable = unlocked || s >= 1;
+        const cls = s === 2 ? "mastered" : s === 1 ? "done" : clickable ? "open" : "locked";
+        const icon = s === 2 ? "👑" : s === 1 ? "✓" : clickable ? (u + 1) : "🔒";
+        html += `<button class="path-node ${cls}" ${clickable ? `onclick="startPathUnit(${idx})"` : "disabled"}>${icon}</button>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+    gi += sec.units;
+  });
+  wrap.innerHTML = html || '<div style="padding:40px;text-align:center;color:var(--text-muted)">경로 데이터가 없어요</div>';
+}
+
+async function startPathUnit(idx) {
+  await loadPathData();
+  const refs = PATH_UNITS[idx];
+  if (!refs) { showToast("마지막 유닛까지 끝냈어요 🎉"); showView("path"); loadPath(); return; }
+  showToast("불러오는 중…");
+  const data = await apiFetch("/api/unit_cards", "POST", { refs });
+  const cards = data.cards || [];
+  if (!cards.length) { showToast("카드를 불러오지 못했어요"); return; }
+  startLesson(cards, idx);
+}
+
+// ── 멀티스텝 유닛 레슨 ───────────────────────────────────
+function startLesson(cards, unitIdx, mode = "path") {
+  const words = cards.filter(c => c.back_meaning && c.front);
+  const kanji = cards.filter(c => c.type === "kanji");
+  const hasKey = !!(State.settings.gemini_api_key || "").trim();
+  const steps = [{ type: "intro" }];
+  if (words.length >= 4) steps.push({ type: "match" });
+  steps.push({ type: "quiz", dir: "f2m" });
+  if (words.filter(c => c.type === "word").length >= 4) steps.push({ type: "listen" });
+  steps.push({ type: "quiz", dir: "m2f" });
+  if (hasKey && kanji.length) steps.push({ type: "writing" });   // 한자 직접 쓰기
+  if (hasKey) steps.push({ type: "sentence" });                  // 배운 단어로 문장 맞추기
+  State.lesson = { cards, words, steps, idx: 0, unitIdx, wrong: new Set(), mode };
+  if (hasKey) {
+    // 레슨 푸는 동안 백그라운드로 미리 생성 (문장 스텝에서 즉시 출제)
+    const sw = cards.filter(c => c.type === "word").map(c => c.front);
+    State.lesson._sentP = fetchLessonSentences(sw.length ? sw : words.map(w => w.front));
+  }
+  showView("lesson");
+  runLessonStep();
+}
+function lessonExit() {
+  const m = State.lesson && State.lesson.mode;
+  if (m === "match") { showView("ai"); return; }
+  if (m === "review") { showView("home"); loadHome(); return; }
+  showView("path"); loadPath();
+}
+function runLessonStep() {
+  const L = State.lesson, step = L.steps[L.idx], body = document.getElementById("lesson-body");
+  document.getElementById("lesson-step").textContent = `${Math.min(L.idx + 1, L.steps.length)} / ${L.steps.length}`;
+  if (!step) { finishLesson(); return; }
+  if (step.type === "intro") return lessonIntro(body);
+  if (step.type === "match") return renderMatch(body, L.words, () => lessonNext());
+  if (step.type === "quiz") return lessonQuiz(body, step.dir);
+  if (step.type === "listen") return lessonListen(body);
+  if (step.type === "writing") return lessonWriting(body);
+  if (step.type === "sentence") return lessonSentence(body);
+}
+function lessonNext() { State.lesson.idx++; runLessonStep(); }
+function lessonIntro(body) {
+  const L = State.lesson;
+  body.innerHTML = `
+    <div class="lesson-prompt" style="font-size:16px;margin-bottom:8px">새로 배울 ${L.cards.length}개</div>
+    <div class="lesson-intro">${L.cards.map((c, i) => `
+      <div class="li-row" onclick="speak(cardTTSText(State.lesson.cards[${i}]))">
+        <div class="li-front">${escapeHtml(c.front)}</div>
+        <div class="li-info"><div>${escapeHtml(shortMeaning(c.back_meaning))}</div>
+          <div class="li-read">${escapeHtml(displayReading(c))}</div></div>
+        <div>🔊</div></div>`).join("")}</div>
+    <button class="start-btn" style="margin-top:14px" onclick="lessonNext()">시작하기 →</button>`;
+}
+function lessonQuiz(body, dir) {
+  const L = State.lesson, items = L.words.slice();
+  let qi = 0;
+  function showQ() {
+    if (qi >= items.length) { lessonNext(); return; }
+    const c = items[qi];
+    const prompt = dir === "f2m" ? c.front : shortMeaning(c.back_meaning);
+    const sub = dir === "f2m" ? displayReading(c) : "";
+    const answer = dir === "f2m" ? shortMeaning(c.back_meaning) : c.front;
+    const pool = (dir === "f2m" ? L.words.map(x => shortMeaning(x.back_meaning)) : L.words.map(x => x.front)).filter(Boolean);
+    const opts = shuffleArr([answer, ...shuffleArr(pool.filter(x => x !== answer)).slice(0, 3)]);
+    body.innerHTML = `
+      <div class="lesson-prompt">${escapeHtml(prompt)}<div class="li-read">${escapeHtml(sub)}</div></div>
+      <div class="quiz-options">${opts.map((o, i) => `<button class="quiz-option" data-i="${i}">${escapeHtml(o)}</button>`).join("")}</div>
+      <div class="quiz-reveal" id="lq-rev" style="display:none"></div>`;
+    body.querySelectorAll(".quiz-option").forEach((b, i) => {
+      b.onclick = () => {
+        const ok = opts[i] === answer;
+        if (!ok) L.wrong.add(c.front);
+        body.querySelectorAll(".quiz-option").forEach((bb, j) => {
+          bb.classList.add("disabled");
+          if (opts[j] === answer) bb.classList.add("correct");
+          else if (j === i) bb.classList.add("wrong");
+        });
+        if (dir === "f2m") speak(cardTTSText(c));
+        const rev = document.getElementById("lq-rev");
+        rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
+        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div>
+          <div class="reveal-front">${escapeHtml(c.front)}</div>
+          <div class="reveal-meaning">${escapeHtml((displayReading(c) || "") + " " + shortMeaning(c.back_meaning))}</div>
+          <button class="quiz-next-btn" id="lq-next">다음 →</button>`;
+        document.getElementById("lq-next").onclick = () => { qi++; showQ(); };
+      };
+    });
+  }
+  showQ();
+}
+function lessonListen(body) {
+  const L = State.lesson, items = L.words.filter(c => c.type === "word");
+  let qi = 0;
+  function showQ() {
+    if (qi >= items.length) { lessonNext(); return; }
+    const c = items[qi];
+    const answer = c.back_meaning;
+    const opts = shuffleArr([answer, ...shuffleArr(L.words.map(x => x.back_meaning).filter(x => x && x !== answer)).slice(0, 3)]);
+    body.innerHTML = `
+      <div style="text-align:center;margin:24px 0 16px">
+        <button class="tts-btn" style="font-size:17px;padding:14px 22px" onclick="speak(cardTTSText(State.lesson._cur))">🔊 듣기</button>
+        <button class="tts-btn" style="margin-left:8px" onclick="speakRate(cardTTSText(State.lesson._cur),0.6)">🐢</button>
+      </div>
+      <div class="quiz-options">${opts.map((o, i) => `<button class="quiz-option" data-i="${i}">${escapeHtml(o)}</button>`).join("")}</div>
+      <div class="quiz-reveal" id="ll-rev" style="display:none"></div>`;
+    L.lesson_cur = c; State.lesson._cur = c;
+    speak(cardTTSText(c));
+    body.querySelectorAll(".quiz-option").forEach((b, i) => {
+      b.onclick = () => {
+        const ok = opts[i] === answer; if (!ok) L.wrong.add(c.front);
+        body.querySelectorAll(".quiz-option").forEach((bb, j) => { bb.classList.add("disabled"); if (opts[j] === answer) bb.classList.add("correct"); else if (j === i) bb.classList.add("wrong"); });
+        const rev = document.getElementById("ll-rev"); rev.style.display = "block"; rev.className = "quiz-reveal " + (ok ? "ok" : "ng");
+        rev.innerHTML = `<div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div><div class="reveal-front">${escapeHtml(c.front)}</div><div class="reveal-meaning">${escapeHtml((displayReading(c) || "") + " " + shortMeaning(c.back_meaning))}</div><button class="quiz-next-btn" id="ll-next">다음 →</button>`;
+        document.getElementById("ll-next").onclick = () => { qi++; showQ(); };
+      };
+    });
+  }
+  showQ();
+}
+// 한자 쓰기 스텝 (쓰기 오버레이 재사용, 끝나면 다음 스텝으로)
+function lessonWriting(body) {
+  const kanji = State.lesson.cards.filter(c => c.type === "kanji").slice(0, 3);
+  if (!kanji.length) { lessonNext(); return; }
+  State.lesson._wk = kanji;
+  body.innerHTML = `<div style="text-align:center;padding:40px 0">
+    <div style="font-size:54px">✍️</div>
+    <div class="complete-title" style="font-size:21px">한자 쓰기</div>
+    <div class="complete-sub">한자 ${kanji.length}개를 직접 써보세요</div>
+    <button class="start-btn" style="margin:20px 0 10px" onclick="lessonStartWriting()">쓰기 시작 →</button>
+    <button class="start-btn ghost" onclick="lessonNext()">건너뛰기</button></div>`;
+}
+function lessonStartWriting() {
+  openWriting(State.lesson._wk || [], 0, true, () => lessonNext());
+}
+
+// 유닛 단어로 문장 생성 시도 → 실패하면 일반 캐시 → 둘 다 없으면 빈 배열(스텝 스킵)
+async function fetchLessonSentences(words) {
+  const d = await apiFetch("/api/ai/sentences", "POST", { words });
+  let items = (d.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  if (!items.length) {
+    const g = await apiFetch("/api/ai/sentences", "POST", {});
+    items = (g.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  }
+  return items.slice(0, 3);
+}
+// 문장 맞추기 스텝 (타일 배열, 방향 랜덤 한↔일)
+function lessonSentence(body) {
+  const L = State.lesson;
+  body.innerHTML = `<div style="text-align:center;color:var(--text-secondary);padding:48px 0">
+    <div class="spinner"></div><div style="margin-top:12px">문장 준비 중…</div></div>`;
+  Promise.resolve(L._sentP).then(items => {
+    items = (items || []).filter(s => s.jp_tiles && s.kr_tiles).slice(0, 3);
+    if (!items.length) { lessonNext(); return; }   // 못 만들면 조용히 스킵
+    let qi = 0;
+    function showS() {
+      if (qi >= items.length) { lessonNext(); return; }
+      const it = items[qi];
+      const dir = Math.random() < 0.5 ? "jp2kr" : "kr2jp";
+      const prompt = dir === "jp2kr" ? it.jp : it.kr;
+      const hint = dir === "jp2kr" ? "일본어를 보고 한국어를 순서대로" : "한국어를 보고 일본어를 순서대로";
+      const target = (dir === "jp2kr" ? it.kr_tiles : it.jp_tiles).slice();
+      let answer = [], bank = shuffleArr(target.slice()), bankOrig = bank.slice(), done = false;
+      function draw() {
+        body.innerHTML = `
+          <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 8px">${hint}</div>
+          <div class="lesson-prompt" style="font-size:18px;margin:6px 0 14px">${escapeHtml(prompt)}</div>
+          <div class="sent-answer">${answer.map((t, i) => `<button class="tile" data-a="${i}">${escapeHtml(t)}</button>`).join("") || '<span class="sent-placeholder">아래에서 순서대로 누르세요</span>'}</div>
+          <div class="sent-bank">${bank.map((t, i) => t === null
+            ? `<button class="tile used" disabled>${escapeHtml(bankOrig[i] || "·")}</button>`
+            : `<button class="tile" data-b="${i}">${escapeHtml(t)}</button>`).join("")}</div>
+          <div class="sent-result" id="ls-res" style="display:none"></div>
+          <button class="quiz-next-btn" id="ls-check">확인</button>`;
+        body.querySelectorAll("[data-b]").forEach(b => b.onclick = () => {
+          if (done) return; const i = +b.dataset.b; if (bank[i] === null) return;
+          answer.push(bank[i]); bank[i] = null; draw();
+        });
+        body.querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
+          if (done) return; const i = +b.dataset.a; const t = answer.splice(i, 1)[0];
+          const e = bank.indexOf(null); if (e >= 0) bank[e] = t; else bank.push(t); draw();
+        });
+        document.getElementById("ls-check").onclick = check;
+      }
+      function check() {
+        if (done) { qi++; showS(); return; }
+        done = true;
+        const ok = answer.join("") === target.join("");
+        const res = document.getElementById("ls-res");
+        res.style.display = "block"; res.className = "sent-result " + (ok ? "ok" : "ng");
+        res.innerHTML = `<div class="sent-result-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+          <div class="sent-result-jp">${escapeHtml(it.jp)}</div>
+          <div class="sent-result-kr">${escapeHtml(it.kr)}</div>`;
+        speak(it.jp);
+        body.querySelectorAll(".tile").forEach(b => b.classList.add("disabled"));
+        const btn = document.getElementById("ls-check");
+        btn.textContent = (qi >= items.length - 1) ? "완료 →" : "다음 문장 →";
+        btn.onclick = check;
+      }
+      draw();
+    }
+    showS();
+  });
+}
+async function finishLesson() {
+  const L = State.lesson;
+  // 모든 카드 평가가 DB에 반영될 때까지 기다린다 → 홈 통계(연속 일수 등)가 즉시 갱신
+  await Promise.all(L.cards.map(c =>
+    apiFetch("/api/review", "POST", { card_id: c.id, answer: L.wrong.has(c.front) ? "hard" : "good" })));
+  loadHome();   // 백그라운드로 홈 데이터 새로고침(완료 직후 누가 홈으로 가도 최신값)
+  const body = document.getElementById("lesson-body");
+  document.getElementById("lesson-step").textContent = "완료";
+  const review = L.mode === "review";
+  const moreBtn = review
+    ? `<button class="start-btn" style="margin:20px 0 10px" onclick="startReview()">🔁 더 복습</button>`
+    : `<button class="start-btn" style="margin:20px 0 10px" onclick="startPathUnit(${L.unitIdx + 1})">▶ 다음 유닛</button>`;
+  body.innerHTML = `<div style="text-align:center;padding:36px 0">
+    <div style="font-size:60px">🎉</div>
+    <div class="complete-title">${review ? "복습 완료!" : "유닛 완료!"}</div>
+    <div class="complete-sub">${L.wrong.size === 0 ? "한 번도 안 틀렸어요! 🔥" : `틀린 단어 ${L.wrong.size}개는 곧 복습으로 나와요`}</div>
+    ${moreBtn}
+    <button class="start-btn ghost" onclick="lessonExit()">${review ? "🏠 홈으로" : "🗺️ 경로로"}</button></div>`;
+}
+
+// ── 짝 맞추기 (한국어 ↔ 일본어 매칭) ─────────────────────
+function renderMatch(container, cards, onDone) {
+  const items = cards.filter(c => c.back_meaning && c.front).slice(0, 5);
+  if (items.length < 2) { onDone(0); return; }
+  let left = shuffleArr(items.map((c, i) => ({ i, t: shortMeaning(c.back_meaning) })));
+  let right = shuffleArr(items.map((c, i) => {
+    // 한자는 글자만 보여준다(읽기를 떠올리는 게 목적). 단어는 읽기(가나)가 도움되니 함께 표시.
+    const r = c.type === "kanji" ? "" : displayReading(c);
+    return { i, t: c.front + (r ? `（${r}）` : "") };
+  }));
+  let selL = null, selR = null, matched = new Set(), mistakes = 0;
+  function draw() {
+    container.innerHTML = `<div style="text-align:center;color:var(--text-secondary);font-size:13px;margin:6px 0 12px">짝을 맞춰보세요</div>
+      <div class="match-wrap">
+        <div class="match-col">${left.map((x, li) => `<button class="match-cell ${matched.has(x.i) ? "matched" : ""} ${selL === li ? "sel" : ""}" data-l="${li}">${escapeHtml(x.t)}</button>`).join("")}</div>
+        <div class="match-col">${right.map((x, ri) => `<button class="match-cell ${matched.has(x.i) ? "matched" : ""} ${selR === ri ? "sel" : ""}" data-r="${ri}">${escapeHtml(x.t)}</button>`).join("")}</div>
+      </div>`;
+    container.querySelectorAll(".match-cell").forEach(b => {
+      b.onclick = () => {
+        if (b.dataset.l !== undefined) { if (matched.has(left[+b.dataset.l].i)) return; selL = +b.dataset.l; }
+        else { if (matched.has(right[+b.dataset.r].i)) return; selR = +b.dataset.r; }
+        if (selL !== null && selR !== null) {
+          if (left[selL].i === right[selR].i) {
+            matched.add(left[selL].i);
+            const c = cards[left[selL].i]; if (c) speak(cardTTSText(c));
+            selL = selR = null; draw();
+            if (matched.size === items.length) setTimeout(() => onDone(mistakes), 450);
+            return;
+          } else {
+            mistakes++; selL = selR = null; draw();
+            return;
+          }
+        }
+        draw();
+      };
+    });
+  }
+  draw();
+}
+async function startMatchGame() {
+  showToast("불러오는 중…");
+  // 여태 학습 중인(복습 이력 있는) 단어 전체를 풀로 → 매 라운드 무작위 5개라 골고루 등장
+  const data = await apiFetch("/api/cards?state=studied&per_page=1000");
+  let pool = (data.cards || []).filter(c => c.back_meaning && c.front);
+  if (pool.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
+    const t = await apiFetch("/api/today");
+    pool = [...(t.review_cards || []), ...(t.new_cards || [])].filter(c => c.back_meaning && c.front);
+  }
+  if (pool.length < 4) { showToast("카드가 부족해요"); return; }
+  State.lesson = { mode: "match" };
+  State.match = { pool };
+  showView("lesson");
+  document.getElementById("lesson-step").textContent = "🔗 짝 맞추기";
+  matchRound();
+}
+function matchRound() {
+  const set = shuffleArr(State.match.pool).slice(0, 5);
+  renderMatch(document.getElementById("lesson-body"), set, m => {
+    showToast(m === 0 ? "완벽! 🔥" : "좋아요!");
+    setTimeout(matchRound, 700);
+  });
+}
+
+// 복습하기 — 여태 학습한 카드(약한 순)를 멀티스텝 레슨으로 연습
+async function startReview() {
+  showToast("복습 카드 준비 중…");
+  // 여태 학습 중인(복습 이력 있는) 단어 전체를 풀로 삼아 매 세션 무작위 8개 → 결국 모든 단어가 돌아가며 등장
+  const data = await apiFetch("/api/cards?state=studied&per_page=1000");
+  let pool = (data.cards || []).filter(c => c.front && c.back_meaning);
+  if (pool.length < 4) {   // 학습한 게 부족하면 오늘치(복습·신규)로 보충
+    const t = await apiFetch("/api/today");
+    const seen = new Set(pool.map(c => c.id));
+    for (const c of [...(t.review_cards || []), ...(t.new_cards || [])])
+      if (c.front && c.back_meaning && !seen.has(c.id)) pool.push(c);
+  }
+  if (pool.length < 2) { showToast("아직 복습할 카드가 없어요. 학습 경로로 시작해 보세요!"); return; }
+  const cards = shuffleArr(pool).slice(0, 8);
+  startLesson(cards, -1, "review");
+}
+
+// 랜덤 퀴즈 — 등급 선택 없이 학습 내역(학습한 카드 우선)으로 바로 출제
+async function startRandomQuiz() {
+  await launchQuiz("/api/quiz?n=15", "랜덤 퀴즈");
+}
+
+// 홈 '학습 현황' 탭 → 단어장에서 여태 학습한 카드만 보여준다
+function goStudied() {
+  State.vocab.filter = "studied";
+  showView("vocab");   // showView가 이 필터로 loadVocab 실행
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
 }
 
 // ══════════════════════════════════════════════════════════
 //  단어장
 // ══════════════════════════════════════════════════════════
 
-async function loadVocab() {
-  const listEl = document.getElementById("card-list");
-  listEl.innerHTML = '<div class="spinner"></div>';
+const VOCAB_PER_PAGE = 60;
 
-  const data = await apiFetch("/api/cards?per_page=500");
-  State.vocab.allCards = data.cards;
-  renderCardList(applyFilter(data.cards, State.vocab.filter));
+// 필터 이름 → /api/cards 쿼리 파라미터
+function filterToQuery(filter) {
+  if (filter === "rec") return "personalized=1";   // 추천 = 학습한 것 중 약한 순
+  if (filter === "all") return "scope=1";   // 전체 = 선택한 레벨/급수 범위
+  if (filter === "kanji" || filter === "word" || filter === "grammar") return `type=${filter}`;
+  if (["n5", "n4", "n3", "n2", "n1"].includes(filter)) return `level=${filter.toUpperCase()}`;
+  if (filter === "state-new")      return "state=new";
+  if (filter === "state-learning") return "state=learning";
+  if (filter === "state-mastered") return "state=mastered";
+  if (filter === "studied")        return "state=studied";   // 여태 학습한 것
+  return "";
+}
+
+async function loadVocab(reset = true) {
+  const v = State.vocab;
+  if (v.loading || (!reset && v.done)) return;
+  v.loading = true;
+
+  if (reset) {
+    v.page = 1; v.done = false; v.cards = []; v.search = "";
+    document.getElementById("card-list").innerHTML = '<div class="spinner"></div>';
+  }
+
+  const q = filterToQuery(v.filter);
+  const data = await apiFetch(`/api/cards?per_page=${VOCAB_PER_PAGE}&page=${v.page}${q ? "&" + q : ""}`);
+  const cards = data.cards || [];
+  v.cards.push(...cards);
+  if (cards.length < VOCAB_PER_PAGE) v.done = true;
+  v.page++;
+  v.loading = false;
+  renderCardList(v.cards, data.total);
 }
 
 function setFilter(filter) {
   State.vocab.filter = filter;
-
-  // 칩 활성화
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
   const chipMap = {
-    "all":            "chip-all",
-    "kanji":          "chip-kanji",
-    "word":           "chip-word",
-    "n5":             "chip-n5",
-    "n4":             "chip-n4",
-    "n3":             "chip-n3",
-    "n2":             "chip-n2",
-    "n1":             "chip-n1",
-    "state-new":      "chip-new",
-    "state-learning": "chip-learning",
-    "state-mastered": "chip-mastered",
+    "rec": "chip-rec",
+    "all": "chip-all", "kanji": "chip-kanji", "word": "chip-word", "grammar": "chip-grammar",
+    "n5": "chip-n5", "n4": "chip-n4", "n3": "chip-n3", "n2": "chip-n2", "n1": "chip-n1",
+    "state-new": "chip-new", "state-learning": "chip-learning", "state-mastered": "chip-mastered",
   };
   const el = document.getElementById(chipMap[filter]);
   if (el) el.classList.add("active");
-
-  renderCardList(applyFilter(State.vocab.allCards, filter));
+  document.getElementById("search-input").value = "";
+  loadVocab(true);
 }
 
-function applyFilter(cards, filter) {
-  switch (filter) {
-    case "kanji":          return cards.filter(c => c.type === "kanji");
-    case "word":           return cards.filter(c => c.type === "word");
-    case "n5":             return cards.filter(c => c.jlpt_level === "N5");
-    case "n4":             return cards.filter(c => c.jlpt_level === "N4");
-    case "n3":             return cards.filter(c => c.jlpt_level === "N3");
-    case "n2":             return cards.filter(c => c.jlpt_level === "N2");
-    case "n1":             return cards.filter(c => c.jlpt_level === "N1");
-    case "state-new":      return cards.filter(c => c.state === "new");
-    case "state-learning": return cards.filter(c => c.state === "learning");
-    case "state-mastered": return cards.filter(c => c.state === "mastered");
-    default:               return cards;
-  }
-}
-
-function renderCardList(cards) {
+function renderCardList(cards, total) {
   const listEl = document.getElementById("card-list");
-  State.vocab.displayCards = cards;
+  State.vocab.cards = cards;
 
   if (cards.length === 0) {
     listEl.innerHTML = `
@@ -376,39 +1230,65 @@ function renderCardList(cards) {
     return;
   }
 
-  listEl.innerHTML = cards.map(card => {
-    const isKanji = card.type === "kanji";
+  const items = cards.map(card => {
+    const frontCls = card.type === "kanji" ? "" : card.type === "grammar" ? "grammar-front" : "word-front";
     return `
-      <div class="card-list-item animate-in" onclick="openCardDetail(${card.id})">
-        <div class="card-list-kanji ${isKanji ? "" : "word-front"}">${card.front}</div>
+      <div class="card-list-item" onclick="openCardDetail(${card.id})">
+        <div class="card-list-kanji ${frontCls}">${escapeHtml(card.front)}</div>
         <div class="card-list-info">
-          <div class="card-list-meaning">${card.back_meaning}</div>
-          <div class="card-list-reading">${card.back_reading}</div>
+          <div class="card-list-meaning">${escapeHtml(shortMeaning(card.back_meaning))}</div>
+          <div class="card-list-reading">${escapeHtml(displayReading(card))}</div>
         </div>
         <div class="card-state-dot ${card.state}"></div>
       </div>`;
   }).join("");
+
+  const footer = State.vocab.done
+    ? (total ? `<div class="list-footer">전체 ${total}개${State.vocab.search ? " (검색)" : ""}</div>` : "")
+    : `<div class="list-footer">불러오는 중…</div>`;
+  listEl.innerHTML = items + footer;
+}
+
+// 무한 스크롤 — 바닥 근처에서 다음 페이지 로드
+function onVocabScroll(e) {
+  if (State.vocab.search) return;        // 검색 결과는 페이지네이션 없음
+  const el = e.target;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadVocab(false);
 }
 
 let searchTimer;
 function onSearch(query) {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
-    if (!query.trim()) {
-      renderCardList(applyFilter(State.vocab.allCards, State.vocab.filter));
-      return;
-    }
+    if (!query.trim()) { loadVocab(true); return; }
+    State.vocab.search = query;
+    State.vocab.done = true;
     const data = await apiFetch(`/api/search?q=${encodeURIComponent(query)}`);
-    renderCardList(data.results);
+    renderCardList(data.results || [], (data.results || []).length);
   }, 300);
 }
 
+let cdCard = null;
 function openCardDetail(id) {
-  // 단어장에서 카드를 누르면 해당 글자 쓰기 연습 열기
-  const card = State.vocab.allCards.find(c => c.id === id)
-            || (State.vocab.displayCards || []).find(c => c.id === id);
-  if (card) openWriting([card], 0);
+  const card = (State.vocab.cards || []).find(c => c.id === id);
+  if (!card) return;
+  cdCard = card;
+  document.getElementById("cd-front").textContent = card.front;
+  document.getElementById("cd-sub").textContent =
+    [card.back_reading, card.back_meaning_full || card.back_meaning].filter(Boolean).join("  ·  ");
+  // 문법은 쓰기 연습 숨김
+  document.getElementById("cd-write-btn").style.display = card.type === "grammar" ? "none" : "";
+  // 한자면 읽기 사용 비율(음독/훈독) 표시
+  document.getElementById("cd-freq").innerHTML = card.type === "kanji" ? readingFreqHtml(card.front) : "";
+  document.getElementById("card-detail-overlay").classList.add("open");
+  // AI 뜻 풀이·예문 (캐시 있으면 즉시, 없으면 생성하며 스트리밍)
+  streamInto("/api/ai/explain", { card_id: card.id }, document.getElementById("cd-ai"));
 }
+function closeCardDetail() {
+  document.getElementById("card-detail-overlay").classList.remove("open");
+}
+function cdSpeak() { if (cdCard) speak(cardTTSText(cdCard)); }
+function cdWrite() { if (cdCard) { closeCardDetail(); openWriting([cdCard], 0); } }
 
 // ══════════════════════════════════════════════════════════
 //  통계
@@ -417,13 +1297,14 @@ function openCardDetail(id) {
 async function loadStats() {
   const stats = await apiFetch("/api/stats");
 
-  document.getElementById("s-total").textContent     = stats.total_cards;
-  document.getElementById("s-mastered").textContent  = stats.mastered;
-  document.getElementById("s-today-done").textContent = stats.today_reviewed;
-  document.getElementById("s-accuracy").textContent  = stats.today_accuracy + "%";
+  // 선택한 범위 기준 (총 카드 절대값은 설정 화면에만 표시)
+  document.getElementById("s-total").textContent     = stats.scope_total ?? stats.total_cards ?? 0;
+  document.getElementById("s-mastered").textContent  = stats.scope_mastered ?? stats.mastered ?? 0;
+  document.getElementById("s-today-done").textContent = stats.today_reviewed ?? 0;
+  document.getElementById("s-accuracy").textContent  = (stats.today_accuracy ?? 0) + "%";
 
-  renderHeatmap(stats.heatmap);
-  renderWeakCards(stats.weak_cards);
+  renderHeatmap(stats.heatmap || []);
+  renderWeakCards(stats.weak_cards || []);
 }
 
 function renderHeatmap(data) {
@@ -485,14 +1366,13 @@ async function analyzeLyrics() {
     showToast("가사를 입력해 주세요!");
     return;
   }
-
   const resultsEl = document.getElementById("lyrics-results");
   resultsEl.innerHTML = '<div class="spinner"></div>';
 
   const data = await apiFetch("/api/lyrics/analyze", "POST", { text });
 
   if (!data.found) {
-    State.lyrics.foundIds = [];
+    State.lyrics.foundIds = []; State.lyrics.foundCards = []; State.lyrics.lastData = null;
     resultsEl.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
@@ -501,25 +1381,97 @@ async function analyzeLyrics() {
       </div>`;
     return;
   }
+  State.lyrics.lastData = data;
+  renderLyricsResults(data);
+}
 
-  // 가사 퀴즈 / 쓰기 연습에 쓸 카드 보관
+function renderLyricsResults(data) {
   State.lyrics.foundIds = data.kanji.map(k => k.id);
   State.lyrics.foundCards = data.kanji;
-
-  resultsEl.innerHTML = `
+  // 편집기가 숨겨진(저장된 가사 보기) 상태면 '수정' 버튼을 위에 보여준다
+  const editorHidden = document.getElementById("lyrics-editor").style.display === "none";
+  const editBtn = editorHidden
+    ? `<button class="analyze-btn" style="margin:0 20px 12px;width:calc(100% - 40px)" onclick="editLyric()">✏️ 수정</button>` : "";
+  document.getElementById("lyrics-results").innerHTML = editBtn + `
     <div class="result-summary">가사에서 <b style="color:var(--indigo)">${data.found}개</b>의 한자를 찾았어요!</div>
-    <div class="lyrics-actions">
-      <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>이 한자로 퀴즈</span></button>
+    <div class="lyrics-actions lyrics-actions-grid">
+      <button class="action-btn" onclick="startLyricsQuiz()"><span class="action-emoji">🎯</span><span>퀴즈</span></button>
+      <button class="action-btn" onclick="startLyricsCards()"><span class="action-emoji">🃏</span><span>카드 학습</span></button>
+      <button class="action-btn" onclick="startLyricsSentences()"><span class="action-emoji">🧩</span><span>문장 연습</span></button>
       <button class="action-btn" onclick="openWriting(State.lyrics.foundCards, 0)"><span class="action-emoji">✍️</span><span>쓰기 연습</span></button>
     </div>
     <div class="result-kanji-grid">
       ${data.kanji.map((k, i) => `
         <div class="result-kanji-card" onclick="openWriting(State.lyrics.foundCards, ${i})">
-          <div class="result-kanji-char">${k.front}</div>
-          <div class="result-kanji-meaning">${k.back_meaning}</div>
+          <div class="result-kanji-char">${escapeHtml(k.front)}</div>
+          <div class="result-kanji-meaning">${escapeHtml(k.back_meaning)}</div>
           <div class="result-kanji-state ${k.state}"></div>
         </div>`).join("")}
     </div>`;
+
+  // 한자 결과가 뜨는 즉시, '문장 연습'용 문장을 백그라운드로 미리 생성
+  prefetchLyricsSentences();
+}
+
+// 가사 한자로 카드(플래시) 학습
+function studyCards(cards) {
+  if (!cards || !cards.length) { showToast("카드가 없어요"); return; }
+  showView("study");
+  document.getElementById("study-complete").style.display = "none";
+  State.study.queue = cards;
+  State.study.unified = false;
+  State.study.extra = false;
+  State.study.index = 0;
+  State.study.sessionCorrect = 0;
+  State.study.sessionTotal = 0;
+  State.study.hardFronts = [];
+  showCard(0);
+}
+function startLyricsCards() { studyCards(State.lyrics.foundCards || []); }
+
+// 가사 한자로 문장을 백그라운드 미리 생성 (들어갈 때 기다림 없이 바로 시작되게)
+function prefetchLyricsSentences() {
+  const words = (State.lyrics.foundCards || []).map(c => c.front);
+  if (!words.length) return;
+  const key = words.join(",");
+  if (State.lyrics.sentFor === key && State.lyrics.sentPromise) return;   // 이미 준비/준비중
+  State.lyrics.sentFor = key;
+  State.lyrics.sentPromise = (async () => {
+    try {
+      const data = await apiFetch("/api/ai/sentences", "POST", { words });
+      return (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+    } catch (e) { return []; }
+  })();
+}
+
+// 가사 한자로 문장 연습 (미리 생성된 문장이 있으면 즉시 시작)
+async function startLyricsSentences() {
+  const words = (State.lyrics.foundCards || []).map(c => c.front);
+  if (!words.length) { showToast("먼저 가사를 분석해 주세요"); return; }
+  const key = words.join(",");
+
+  let items = null;
+  if (State.lyrics.sentFor === key && State.lyrics.sentPromise) {
+    items = await State.lyrics.sentPromise;   // 보통 이미 준비됨 (대기 없음)
+  }
+  if (!items || !items.length) {
+    showToast("문장 만드는 중…");
+    const data = await apiFetch("/api/ai/sentences", "POST", { words });
+    items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+    if (!items.length) { showToast((data && data.error) || "문장을 만들지 못했어요"); return; }
+  }
+
+  State.sentence.items = items;
+  State.sentence.index = 0;
+  State.sentence.correct = 0;
+  showView("sentence");
+  document.getElementById("sent-complete").style.display = "none";
+  document.getElementById("sent-body").style.display = "flex";
+  showSentence(0);
+
+  // 다음 판도 바로 시작되도록 미리 다시 생성
+  State.lyrics.sentFor = null; State.lyrics.sentPromise = null;
+  prefetchLyricsSentences();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -540,9 +1492,12 @@ async function loadSettingsUI() {
   // 학습 모드 세그먼트
   const mode = s.study_mode || "both";
   document.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word" };
+  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word", grammar_only: "seg-grammar" };
   const el = document.getElementById(modeMap[mode]);
   if (el) el.classList.add("active");
+
+  // 학습 순서 세그먼트
+  setStudyOrder(s.study_order || "jlpt");
 
   // 발음 표시 토글
   document.getElementById("setting-show-reading").checked =
@@ -563,20 +1518,27 @@ async function loadSettingsUI() {
     }
   });
 
-  // 카테고리 활성화 복원
-  const categories = (s.active_categories || "자연,사람,행동,감정,일상,지식").split(",").map(x => x.trim()).filter(Boolean);
-  document.querySelectorAll("#settings-categories-wrap .select-chip").forEach(chip => {
-    const val = chip.id.replace("setting-category-", "");
-    if (categories.includes(val)) {
-      chip.classList.add("active");
-    } else {
-      chip.classList.remove("active");
-    }
-  });
+  // 카테고리 칩 동적 생성 + 활성화 복원 (데이터의 실제 카테고리 사용)
+  const activeCats = (s.active_categories || "").split(",").map(x => x.trim()).filter(Boolean);
+  const catData = await apiFetch("/api/categories");
+  const allCats = catData.categories || [];
+  const wrap = document.getElementById("settings-categories-wrap");
+  wrap.innerHTML = allCats.map(cat => {
+    const on = activeCats.length === 0 || activeCats.includes(cat);
+    return `<button class="select-chip${on ? " active" : ""}" id="setting-category-${cat}" onclick="toggleSettingCategory('${cat}')">${cat}</button>`;
+  }).join("");
+  if (activeCats.length === 0) State.settings.active_categories = allCats.join(",");
 
-  // 총 카드
-  document.getElementById("info-total-cards").textContent =
-    document.getElementById("s-total")?.textContent || "—";
+  // 漢検 급수 칩 — 선택된 JLPT 등급에 해당하는 급수만 표시
+  renderKankenChips(false);
+
+  // Gemini API 키 복원
+  const keyInput = document.getElementById("setting-gemini-key");
+  if (keyInput) keyInput.value = s.gemini_api_key || "";
+
+  // 총 카드(절대값)은 /api/stats 에서
+  const st = await apiFetch("/api/stats");
+  document.getElementById("info-total-cards").textContent = st.total_cards ?? "—";
 }
 
 function changeNewCards(delta) {
@@ -589,10 +1551,15 @@ function changeNewCards(delta) {
 
 function setStudyMode(mode) {
   State.settings.study_mode = mode;
-  document.querySelectorAll(".seg-btn").forEach(b => b.classList.remove("active"));
-  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word" };
-  const el = document.getElementById(modeMap[mode]);
-  if (el) el.classList.add("active");
+  const modeMap = { both: "seg-both", kanji_only: "seg-kanji", word_only: "seg-word", grammar_only: "seg-grammar" };
+  Object.values(modeMap).forEach(id => document.getElementById(id)?.classList.remove("active"));
+  document.getElementById(modeMap[mode])?.classList.add("active");
+}
+
+function setStudyOrder(order) {
+  State.settings.study_order = order;
+  document.getElementById("seg-order-jlpt")?.classList.toggle("active", order === "jlpt");
+  document.getElementById("seg-order-freq")?.classList.toggle("active", order === "frequency");
 }
 
 function toggleShowReading(checked) {
@@ -618,10 +1585,12 @@ function toggleSettingLevel(level) {
     chip.classList.add("active");
   }
   State.settings.active_levels = levels.join(",");
+  // 등급이 바뀌면 그에 맞는 漢検 급수만 다시 표시 (해당 급수 전체 선택)
+  renderKankenChips(true);
 }
 
 function toggleSettingCategory(category) {
-  let categories = (State.settings.active_categories || "자연,사람,행동,감정,일상,지식").split(",").map(x => x.trim()).filter(Boolean);
+  let categories = (State.settings.active_categories || "").split(",").map(x => x.trim()).filter(Boolean);
   const chip = document.getElementById(`setting-category-${category}`);
   if (categories.includes(category)) {
     if (categories.length <= 1) {
@@ -637,6 +1606,61 @@ function toggleSettingCategory(category) {
   State.settings.active_categories = categories.join(",");
 }
 
+// JLPT 등급 ↔ 漢検 급수 매핑 (난이도 근사)
+const KANKEN_BY_JLPT = {
+  "N5": ["10급", "9급"], "N4": ["8급", "7급"], "N3": ["6급", "5급"],
+  "N2": ["4급", "3급"],  "N1": ["준2급", "2급"],
+};
+const KANKEN_ORDER = ["10급", "9급", "8급", "7급", "6급", "5급", "4급", "3급", "준2급", "2급"];
+
+function allowedKanken() {
+  const levels = (State.settings.active_levels || "").split(",").map(s => s.trim()).filter(Boolean);
+  const set = new Set();
+  levels.forEach(l => (KANKEN_BY_JLPT[l] || []).forEach(g => set.add(g)));
+  return KANKEN_ORDER.filter(g => set.has(g));
+}
+
+// 선택된 JLPT 등급에 해당하는 漢検 급수만 칩으로 표시
+// reset=true 면 (등급이 바뀐 경우) 해당 급수를 전부 선택
+function renderKankenChips(reset) {
+  const allowed = allowedKanken();
+  let active = (State.settings.active_kanken || "").split(",").map(s => s.trim()).filter(Boolean);
+  active = reset ? allowed.slice() : active.filter(g => allowed.includes(g));
+  if (active.length === 0) active = allowed.slice();
+  State.settings.active_kanken = active.join(",");
+
+  const wrap = document.getElementById("settings-kanken-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = allowed.map(g =>
+    `<button class="select-chip${active.includes(g) ? " active" : ""}" id="setting-kanken-${g}" onclick="toggleSettingKanken('${g}')">${g}</button>`
+  ).join("");
+}
+
+function toggleSettingKanken(grade) {
+  let grades = (State.settings.active_kanken || "").split(",").map(x => x.trim()).filter(Boolean);
+  const chip = document.getElementById(`setting-kanken-${grade}`);
+  if (grades.includes(grade)) {
+    if (grades.length <= 1) {
+      showToast("⚠️ 최소한 하나 이상의 급수는 활성화해야 해요!");
+      return;
+    }
+    grades = grades.filter(g => g !== grade);
+    chip.classList.remove("active");
+  } else {
+    grades.push(grade);
+    chip.classList.add("active");
+  }
+  State.settings.active_kanken = grades.join(",");
+}
+
+async function resetProgress() {
+  if (!confirm("모든 학습 진도와 복습 기록을 초기화할까요?\n(초기화 전 자동으로 백업돼요)")) return;
+  if (!confirm("정말 초기화합니다. 되돌릴 수 없어요. 계속할까요?")) return;
+  const res = await apiFetch("/api/reset_progress", "POST", {});
+  if (res && res.ok) { showToast("진도를 초기화했어요 ✅"); location.reload(); }
+  else showToast("초기화 실패");
+}
+
 async function saveSettings() {
   await apiFetch("/api/settings", "POST", State.settings);
   showToast("✅ 설정이 저장되었어요!");
@@ -647,19 +1671,24 @@ async function saveSettings() {
 //  한자 쓰기 연습
 // ══════════════════════════════════════════════════════════
 
-function openWriting(cards, index = 0) {
-  if (!cards || cards.length === 0) {
-    showToast("연습할 카드가 없어요");
-    return;
-  }
+// 홈 '쓰기 연습' — 학습 범위 한자를 SRS 순서로 가져와 AI 채점 세션 시작
+async function startWritingPractice() {
+  const data = await apiFetch("/api/writing_cards");
+  const cards = data.cards || [];
+  if (!cards.length) { showToast("쓰기 연습할 한자가 없어요 (설정에서 한자 급수를 확인하세요)"); return; }
+  openWriting(cards, 0, true);
+}
+
+function openWriting(cards, index = 0, srs = false, onDone = null) {
+  if (!cards || cards.length === 0) { showToast("연습할 카드가 없어요"); return; }
   State.writing.cards = cards;
   State.writing.index = index;
+  State.writing.srs = srs;
+  State.writing.onDone = onDone;
+  State.writing.correct = 0;
+  if (!State.writing.mode) State.writing.mode = "trace";
 
   document.getElementById("writing-overlay").classList.add("open");
-  document.getElementById("writing-nav").style.display =
-    cards.length > 1 ? "flex" : "none";
-
-  // 캔버스는 오버레이가 보인 뒤 크기를 잡아야 정확함
   requestAnimationFrame(() => {
     if (!State.writing.canvas) {
       State.writing.canvas = new KanjiCanvas("writing-canvas");
@@ -675,27 +1704,110 @@ function renderWritingCard() {
   const card = w.cards[w.index];
   if (!card) return;
 
-  document.getElementById("writing-meaning").textContent = card.back_meaning || card.front;
-  document.getElementById("writing-reading").textContent = card.back_reading || "";
-  document.getElementById("writing-count").textContent = `${w.index + 1} / ${w.cards.length}`;
+  // 쓰기 연습은 한자 새김+음(예: '사람 인')을 그대로 보여준다
+  document.getElementById("writing-meaning").textContent = card.back_meaning_full || card.back_meaning || card.front;
+  // 한자면 정리된 읽기(빈도순, 음/훈 표기)만, 데이터 없으면 원본
+  document.getElementById("writing-reading").textContent =
+    (card.type === "kanji" && readingFreqLine(card.front)) || card.back_reading || "";
+  document.getElementById("writing-count").textContent =
+    w.cards.length > 1 ? `${w.index + 1} / ${w.cards.length}` : "";
+
+  // 결과/버튼 초기화
+  document.getElementById("writing-result").style.display = "none";
+  const btn = document.getElementById("writing-action");
+  btn.disabled = false;
+  btn.textContent = "🤖 AI 채점";
+  btn.onclick = scoreWriting;
+
+  // 모드 반영 (따라쓰기=가이드 보임 / 외워쓰기=가이드 숨김)
+  w.showGuide = (w.mode === "trace");
+  document.getElementById("wmode-trace").classList.toggle("active", w.mode === "trace");
+  document.getElementById("wmode-recall").classList.toggle("active", w.mode === "recall");
 
   if (w.canvas) {
     w.canvas.showGuide = w.showGuide;
     w.canvas.showGrid = w.showGrid;
-    w.canvas.setGuideKanji(card.front);
+    w.canvas.setGuideKanji(card.front);   // clear + 가이드 다시 그림
   }
+}
+
+function setWriteMode(mode) {
+  State.writing.mode = mode;
+  const w = State.writing;
+  w.showGuide = (mode === "trace");
+  document.getElementById("wmode-trace").classList.toggle("active", mode === "trace");
+  document.getElementById("wmode-recall").classList.toggle("active", mode === "recall");
+  if (w.canvas) w.canvas.toggleGuide(w.showGuide);
+}
+
+async function scoreWriting() {
+  const w = State.writing;
+  const card = w.cards[w.index];
+  if (!w.canvas || w.canvas.isEmpty()) { showToast("먼저 한자를 써주세요 ✍️"); return; }
+
+  const btn = document.getElementById("writing-action");
+  btn.disabled = true;
+  btn.textContent = "채점 중…";
+  const data = await apiFetch("/api/ai/score_writing", "POST",
+    { card_id: card.id, image: w.canvas.exportInk(200) });
+  btn.disabled = false;
+
+  if (data.error) {
+    btn.textContent = "🤖 다시 채점";
+    showWritingResult({ error: data.error });
+    return;
+  }
+
+  showWritingResult(data);
+  speak(cardTTSText(card));   // 채점 후 발음 재생
+
+  if (w.srs) {
+    apiFetch("/api/review", "POST", { card_id: card.id, answer: data.rating });  // SRS 자동 반영
+    if (data.rating === "good" || data.rating === "easy") w.correct++;
+    btn.textContent = (w.index >= w.cards.length - 1) ? "완료" : "다음 →";
+    btn.onclick = writingAdvance;
+  } else {
+    btn.textContent = "🤖 다시 채점";
+    btn.onclick = scoreWriting;
+  }
+}
+
+const RATING_LABEL = { again: "🔴 몰랐어요", hard: "🟠 힘들었어", good: "🟢 맞았어", easy: "💙 완벽해요" };
+
+function showWritingResult(data) {
+  const el = document.getElementById("writing-result");
+  el.style.display = "block";
+  if (data.error) {
+    el.className = "writing-result ng";
+    el.innerHTML = `<div class="wr-feedback">${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  const ok = data.rating === "good" || data.rating === "easy";
+  el.className = `writing-result ${ok ? "ok" : "ng"}`;
+  const card = State.writing.cards[State.writing.index];
+  const freq = card && card.type === "kanji" ? readingFreqHtml(card.front) : "";
+  el.innerHTML = `
+    <div class="wr-head"><span class="wr-rating">${RATING_LABEL[data.rating] || ""}</span>
+      <span class="wr-score">${data.score}점</span></div>
+    <div class="wr-feedback">${escapeHtml(data.feedback || "")}</div>${freq}`;
+}
+
+function writingAdvance() {
+  const w = State.writing;
+  if (w.index >= w.cards.length - 1) {
+    closeWriting();
+    if (w.onDone) { const cb = w.onDone; w.onDone = null; cb(); return; }   // 레슨 스텝이면 다음으로
+    showToast(`쓰기 연습 완료! 정답 ${w.correct}/${w.cards.length} ✍️`);
+    loadHome();
+    return;
+  }
+  w.index++;
+  renderWritingCard();
 }
 
 function openWritingForCurrent() {
   const card = State.study.queue[State.study.index];
-  if (card) openWriting([card], 0);
-}
-
-async function openWritingFromHome() {
-  const data = await apiFetch("/api/cards?type=kanji&per_page=1000");
-  const cards = (data.cards || []);
-  if (!cards.length) { showToast("한자 카드를 불러오지 못했어요"); return; }
-  openWriting(cards, 0);
+  if (card) openWriting([card], 0, false);
 }
 
 function closeWriting() {
@@ -706,14 +1818,6 @@ function clearWriting() {
   if (State.writing.canvas) State.writing.canvas.clear();
 }
 
-function toggleWriteGuide() {
-  State.writing.showGuide = !State.writing.showGuide;
-  if (State.writing.canvas) State.writing.canvas.toggleGuide(State.writing.showGuide);
-  document.getElementById("wc-guide").textContent =
-    State.writing.showGuide ? "가이드 끄기" : "가이드 켜기";
-  document.getElementById("wc-guide").classList.toggle("off", !State.writing.showGuide);
-}
-
 function toggleWriteGrid() {
   State.writing.showGrid = !State.writing.showGrid;
   if (State.writing.canvas) State.writing.canvas.toggleGrid(State.writing.showGrid);
@@ -722,23 +1826,20 @@ function toggleWriteGrid() {
   document.getElementById("wc-grid").classList.toggle("off", !State.writing.showGrid);
 }
 
-function writingNext() {
-  const w = State.writing;
-  w.index = (w.index + 1) % w.cards.length;
-  renderWritingCard();
-}
-
-function writingPrev() {
-  const w = State.writing;
-  w.index = (w.index - 1 + w.cards.length) % w.cards.length;
-  renderWritingCard();
-}
-
 // ══════════════════════════════════════════════════════════
 //  랜덤 사지선다 퀴즈
 // ══════════════════════════════════════════════════════════
 
 function openQuizSetup() {
+  // 지난번에 고른 등급·문제 수를 기본값으로 복원
+  const lv = localStorage.getItem("quizLevel") || "";
+  const cnt = parseInt(localStorage.getItem("quizCount") || "15", 10);
+  State.quiz.level = lv;
+  State.quiz.count = cnt;
+  document.querySelectorAll("#quiz-level-chips .select-chip").forEach(c =>
+    c.classList.toggle("active", (c.dataset.level || "") === lv));
+  document.querySelectorAll("#quiz-count-chips .select-chip").forEach(c =>
+    c.classList.toggle("active", parseInt(c.dataset.n, 10) === cnt));
   document.getElementById("quiz-setup-overlay").classList.add("open");
 }
 function closeQuizSetup() {
@@ -747,11 +1848,13 @@ function closeQuizSetup() {
 
 function pickQuizLevel(btn, level) {
   State.quiz.level = level;
+  localStorage.setItem("quizLevel", level);
   document.querySelectorAll("#quiz-level-chips .select-chip").forEach(c => c.classList.remove("active"));
   btn.classList.add("active");
 }
 function pickQuizCount(btn, n) {
   State.quiz.count = n;
+  localStorage.setItem("quizCount", n);
   document.querySelectorAll("#quiz-count-chips .select-chip").forEach(c => c.classList.remove("active"));
   btn.classList.add("active");
 }
@@ -805,6 +1908,10 @@ function showQuizQuestion(index) {
   quiz.index = index;
   quiz.answered = false;
 
+  // 이전 문제의 정답 공개 패널/다음 버튼 숨김
+  document.getElementById("quiz-reveal").style.display = "none";
+  document.getElementById("quiz-next-btn").style.display = "none";
+
   const q = quiz.questions[index];
   const total = quiz.questions.length;
 
@@ -815,12 +1922,30 @@ function showQuizQuestion(index) {
 
   const promptEl = document.getElementById("quiz-prompt");
   promptEl.textContent = q.prompt;
-  promptEl.classList.toggle("small", q.prompt.length > 6);
+  fitOneLine(promptEl, 76, 22);   // 길이에 상관없이 한 줄에 맞게 글자 크기 자동 축소
 
   const optsEl = document.getElementById("quiz-options");
   optsEl.innerHTML = q.options.map((opt, i) =>
     `<button class="quiz-option" onclick="answerQuiz(this, ${i})">${escapeHtml(opt)}</button>`
   ).join("");
+}
+
+// 텍스트가 컨테이너 폭을 넘지 않도록 한 줄에 맞춰 글자 크기 자동 축소
+function fitOneLine(el, maxPx, minPx) {
+  el.style.whiteSpace = "nowrap";
+  const fit = () => {
+    const parent = el.parentElement;
+    const maxW = (parent ? parent.clientWidth : el.clientWidth) - 6;
+    if (maxW <= 0) return;
+    let size = maxPx;
+    el.style.fontSize = size + "px";
+    let guard = 0;
+    while (el.scrollWidth > maxW && size > minPx && guard++ < 120) {
+      size -= 2;
+      el.style.fontSize = size + "px";
+    }
+  };
+  requestAnimationFrame(fit);   // 레이아웃 잡힌 뒤 측정
 }
 
 function answerQuiz(btn, optionIndex) {
@@ -840,7 +1965,46 @@ function answerQuiz(btn, optionIndex) {
 
   document.getElementById("quiz-score").textContent = quiz.correct;
 
-  setTimeout(() => showQuizQuestion(quiz.index + 1), isCorrect ? 650 : 1300);
+  // 정답·오답 모두 전체 정보(한자/단어 · 읽기 · 뜻)를 공개하고, 다음 버튼 노출
+  showQuizReveal(q, isCorrect);
+}
+
+function showQuizReveal(q, isCorrect) {
+  const info = q.info || {};
+  const el = document.getElementById("quiz-reveal");
+  el.className = `quiz-reveal ${isCorrect ? "ok" : "ng"}`;
+  // 정답 보기에 이미 표시된 정보는 생략(중복 줄여 한 화면에 들어오게):
+  //  front2meaning: 보기=뜻이라 뜻 생략, 읽기만 보여줌
+  //  meaning2front: 보기=한자/단어라 front 생략, 읽기·뜻 보여줌
+  //  front2reading: 보기=읽기라 읽기 생략, 뜻 보여줌
+  const dir = q.direction;
+  const showReading = info.reading && dir !== "front2reading";
+  const showMeaning = info.meaning && dir !== "front2meaning";
+  const lastQ = State.quiz.index >= State.quiz.questions.length - 1;
+  const nextText = lastQ ? "결과 보기 →" : "다음 →";
+  el.innerHTML = `
+    <div class="reveal-mark">${isCorrect ? "⭕ 정답!" : "❌ 오답"}
+      <button class="tts-btn tts-inline" onclick="speakQuizReveal()">🔊</button></div>
+    ${showReading ? `<div class="reveal-reading">${escapeHtml(displayReading({type: info.type, front: info.front, back_reading: info.reading}))}</div>` : ""}
+    ${showMeaning ? `<div class="reveal-meaning">${escapeHtml(shortMeaning(info.meaning))}</div>` : ""}
+    <button class="quiz-next-btn inline" onclick="quizNext()">${nextText}</button>`;
+  el.style.display = "block";
+
+  // 외부 다음 버튼은 사용 안 함(reveal 안으로 통합)
+  document.getElementById("quiz-next-btn").style.display = "none";
+  speakQuizReveal();
+}
+
+function quizNext() {
+  showQuizQuestion(State.quiz.index + 1);
+}
+
+function speakQuizReveal() {
+  const q = State.quiz.questions[State.quiz.index];
+  if (!q) return;
+  const info = q.info || {};
+  // 한자는 빈도순 상위만 읽도록 cardTTSText 재활용 (음독·훈독 전부 읽는 문제 방지)
+  speak(cardTTSText({ type: info.type, front: info.front, back_reading: info.reading }));
 }
 
 function showQuizComplete() {
@@ -870,6 +2034,316 @@ function endQuiz() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  문장 연습 (단어 타일 배열, 듀오링고식)
+// ══════════════════════════════════════════════════════════
+
+function shuffleArr(a) {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function startSentencePractice() {
+  const data = await apiFetch("/api/ai/sentences", "POST", {});
+  if (data.error) { showToast(data.error); return; }
+  const items = (data.sentences || []).filter(s => s.jp_tiles && s.kr_tiles);
+  if (!items.length) { showToast("문장을 만들지 못했어요. 다시 시도해 주세요."); return; }
+
+  State.sentence.items = items;
+  State.sentence.index = 0;
+  State.sentence.correct = 0;
+  showView("sentence");
+  document.getElementById("sent-complete").style.display = "none";
+  document.getElementById("sent-body").style.display = "flex";
+  showSentence(0);
+}
+
+function showSentence(i) {
+  const S = State.sentence;
+  if (i >= S.items.length) { showSentenceComplete(); return; }
+  S.index = i;
+  S.answered = false;
+
+  const item = S.items[i];
+  S.direction = Math.random() < 0.5 ? "jp2kr" : "kr2jp";
+  if (S.direction === "jp2kr") {
+    document.getElementById("sent-direction").textContent = "일본어 문장을 보고 한국어를 순서대로 배열하세요";
+    document.getElementById("sent-prompt").textContent = item.jp;
+    S.target = item.kr_tiles.slice();
+  } else {
+    document.getElementById("sent-direction").textContent = "한국어 문장을 보고 일본어를 순서대로 배열하세요";
+    document.getElementById("sent-prompt").textContent = item.kr;
+    S.target = item.jp_tiles.slice();
+  }
+  S.answer = [];
+  S.bank = shuffleArr(S.target);
+  S.bankOrig = S.bank.slice();   // 자리 고정용(타일 빠져도 높이 유지)
+
+  document.getElementById("sent-progress").style.width = Math.round(i / S.items.length * 100) + "%";
+  document.getElementById("sent-progress-text").textContent = `${i + 1} / ${S.items.length}`;
+  document.getElementById("sent-result").style.display = "none";
+  const checkBtn = document.getElementById("sent-check");
+  checkBtn.textContent = "확인";
+  checkBtn.disabled = false;
+  checkBtn.onclick = checkSentence;
+  renderSentence();
+}
+
+function renderSentence() {
+  const S = State.sentence;
+  document.getElementById("sent-answer").innerHTML = S.answer.map((t, i) =>
+    `<button class="tile" onclick="unpickTile(${i})">${escapeHtml(t)}</button>`).join("")
+    || '<span class="sent-placeholder">아래에서 단어를 순서대로 누르세요</span>';
+  document.getElementById("sent-bank").innerHTML = S.bank.map((t, i) =>
+    t === null
+      ? `<button class="tile used" disabled>${escapeHtml((S.bankOrig && S.bankOrig[i]) || "·")}</button>`
+      : `<button class="tile" onclick="pickTile(${i})">${escapeHtml(t)}</button>`).join("");
+}
+
+function pickTile(i) {
+  const S = State.sentence;
+  if (S.answered || S.bank[i] === null) return;
+  S.answer.push(S.bank[i]);
+  S.bank[i] = null;          // 자리 비움(중복 단어 인덱스 유지)
+  renderSentence();
+}
+
+function unpickTile(i) {
+  const S = State.sentence;
+  if (S.answered) return;
+  const t = S.answer.splice(i, 1)[0];
+  const empty = S.bank.indexOf(null);
+  if (empty >= 0) S.bank[empty] = t; else S.bank.push(t);
+  renderSentence();
+}
+
+function checkSentence() {
+  const S = State.sentence;
+  if (S.answered) return;
+  S.answered = true;
+
+  // 한 문제 풀 때마다 백그라운드로 문장 캐시 보충 → 다음 문장이 항상 미리 준비됨
+  apiFetch("/api/ai/pregenerate", "POST", {});
+
+  const isCorrect = S.answer.join("") === S.target.join("");
+  if (isCorrect) S.correct++;
+
+  const item = S.items[S.index];
+  const resEl = document.getElementById("sent-result");
+  resEl.style.display = "block";
+  resEl.className = `sent-result ${isCorrect ? "ok" : "ng"}`;
+  resEl.innerHTML = `
+    <div class="sent-result-mark">${isCorrect ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="sent-result-jp">${escapeHtml(item.jp)}</div>
+    <div class="sent-result-kr">${escapeHtml(item.kr)}</div>`;
+
+  speak(item.jp);   // 정답 완료 시 일본어 발음 자동 재생
+
+  const checkBtn = document.getElementById("sent-check");
+  checkBtn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
+  checkBtn.onclick = () => showSentence(S.index + 1);
+}
+
+function showSentenceComplete() {
+  document.getElementById("sent-body").style.display = "none";
+  document.getElementById("sent-complete").style.display = "flex";
+  document.getElementById("sent-progress").style.width = "100%";
+  const total = State.sentence.items.length;
+  const correct = State.sentence.correct;
+  document.getElementById("sent-total").textContent = total;
+  document.getElementById("sent-correct").textContent = correct;
+  document.getElementById("sent-accuracy").textContent =
+    (total ? Math.round(correct / total * 100) : 0) + "%";
+}
+
+function endSentence() {
+  showView("home");
+  loadHome();
+}
+
+// ══════════════════════════════════════════════════════════
+//  활용 연습 (동사·형용사 활용 — 규칙 기반, AI 불필요)
+// ══════════════════════════════════════════════════════════
+var CONJ = { verbs: [], adjs: [] };
+async function loadConjugation() {
+  try { CONJ = await (await fetch("/conjugation.json", { cache: "force-cache" })).json(); }
+  catch (e) { CONJ = { verbs: [], adjs: [] }; }
+}
+const _U2I = { "う":"い","く":"き","ぐ":"ぎ","す":"し","つ":"ち","ぬ":"に","ぶ":"び","む":"み","る":"り" };
+const _U2A = { "う":"わ","く":"か","ぐ":"が","す":"さ","つ":"た","ぬ":"な","ぶ":"ば","む":"ま","る":"ら" };
+const _TE  = { "う":"って","く":"いて","ぐ":"いで","す":"して","つ":"って","ぬ":"んで","ぶ":"んで","む":"んで","る":"って" };
+const _TA  = { "う":"った","く":"いた","ぐ":"いだ","す":"した","つ":"った","ぬ":"んだ","ぶ":"んだ","む":"んだ","る":"った" };
+function conjVerb(w, type, form) {
+  if (type === "ichidan") { const s = w.slice(0, -1); return s + { masu:"ます", te:"て", ta:"た", nai:"ない" }[form]; }
+  if (type === "suru")    { const s = w.slice(0, -2); return s + { masu:"します", te:"して", ta:"した", nai:"しない" }[form]; }
+  if (type === "kuru") {
+    if (w === "くる") return { masu:"きます", te:"きて", ta:"きた", nai:"こない" }[form];
+    const s = w.slice(0, -1); return s + { masu:"ます", te:"て", ta:"た", nai:"ない" }[form];   // 来る (한자)
+  }
+  const last = w.slice(-1), stem = w.slice(0, -1);   // godan
+  if (form === "masu") return stem + _U2I[last] + "ます";
+  if (form === "nai")  return stem + _U2A[last] + "ない";
+  if (w === "行く" || w === "いく") return stem + (form === "te" ? "って" : "った");   // 예외
+  return stem + (form === "te" ? _TE : _TA)[last];
+}
+function conjAdj(w, form) { const s = w.slice(0, -1); return s + { ta:"かった", nai:"くない", te:"くて" }[form]; }
+const VERB_FORMS = [["masu","ます형 (정중)"], ["te","て형"], ["ta","た형 (과거)"], ["nai","ない형 (부정)"]];
+const ADJ_FORMS  = [["ta","과거 (~かった)"], ["nai","부정 (~くない)"], ["te","て형 (~くて)"]];
+
+function startConjugation() {
+  const verbs = CONJ.verbs || [], adjs = CONJ.adjs || [];
+  if (!verbs.length) { showToast("데이터 불러오는 중… 잠시 후 다시"); loadConjugation(); return; }
+  const all = [...verbs.map(v => ({ v, kind: "verb" })), ...adjs.map(a => ({ v: a, kind: "adj" }))];
+  const picks = shuffleArr(all).slice(0, 10);
+  State.conj = {
+    index: 0, correct: 0,
+    items: picks.map(p => {
+      const forms = p.kind === "verb" ? VERB_FORMS : ADJ_FORMS;
+      const [f, label] = forms[Math.floor(Math.random() * forms.length)];
+      const ansK = p.kind === "verb" ? conjVerb(p.v.d, p.v.t, f) : conjAdj(p.v.d, f);
+      const ansR = p.kind === "verb" ? conjVerb(p.v.r, p.v.t, f) : conjAdj(p.v.r, f);
+      return { word: p.v.d, reading: p.v.r, meaning: p.v.m, label, ansK, ansR };
+    }),
+  };
+  showView("conj");
+  document.getElementById("conj-complete").style.display = "none";
+  document.getElementById("conj-body").style.display = "";
+  showConjQ();
+}
+function showConjQ() {
+  const S = State.conj, it = S.items[S.index];
+  if (!it) { showConjComplete(); return; }
+  document.getElementById("conj-word").textContent = it.word;
+  document.getElementById("conj-meaning").textContent = it.reading + " · " + it.meaning;
+  document.getElementById("conj-target").textContent = "→ " + it.label;
+  document.getElementById("conj-progress").textContent = `${S.index + 1} / ${S.items.length}`;
+  const inp = document.getElementById("conj-input");
+  inp.value = ""; inp.disabled = false;
+  inp.onkeydown = e => { if (e.key === "Enter") document.getElementById("conj-check").onclick(); };
+  setTimeout(() => inp.focus(), 50);
+  const btn = document.getElementById("conj-check");
+  btn.textContent = "확인"; btn.onclick = checkConj;
+  document.getElementById("conj-result").style.display = "none";
+}
+function checkConj() {
+  const S = State.conj, it = S.items[S.index];
+  const val = (document.getElementById("conj-input").value || "").trim();
+  if (!val) { showToast("답을 입력해 주세요"); return; }
+  const ok = val === it.ansK || val === it.ansR;
+  if (ok) S.correct++;
+  const r = document.getElementById("conj-result");
+  r.style.display = "block";
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 오답"}</div>
+    <div class="reveal-front" style="font-size:22px">${escapeHtml(it.ansK)}<span style="color:var(--text-muted);font-size:15px"> (${escapeHtml(it.ansR)})</span></div>
+    <div class="reveal-meaning">${escapeHtml(it.word)} · ${escapeHtml(it.meaning)}</div>`;
+  speak(it.ansR);
+  document.getElementById("conj-input").disabled = true;
+  const btn = document.getElementById("conj-check");
+  btn.textContent = (S.index >= S.items.length - 1) ? "결과 보기 →" : "다음 →";
+  btn.onclick = () => { S.index++; showConjQ(); };
+}
+function showConjComplete() {
+  document.getElementById("conj-body").style.display = "none";
+  document.getElementById("conj-complete").style.display = "flex";
+  const t = State.conj.items.length, c = State.conj.correct;
+  document.getElementById("conj-total").textContent = t;
+  document.getElementById("conj-correct").textContent = c;
+  document.getElementById("conj-acc").textContent = (t ? Math.round(c / t * 100) : 0) + "%";
+}
+
+// ══════════════════════════════════════════════════════════
+//  듣기 연습 (받아쓰기 — 느리게·반복)
+// ══════════════════════════════════════════════════════════
+async function startListening() {
+  showView("listen");
+  document.getElementById("listen-complete").style.display = "none";
+  document.getElementById("listen-body").style.display = "";
+  document.getElementById("listen-progress").textContent = "문장 준비 중…";
+  const data = await apiFetch("/api/ai/sentences", "POST", {});
+  const items = (data.sentences || []).filter(s => s.jp && s.kr);
+  if (!items.length) { showToast(data.error || "문장이 아직 없어요. 학습을 한 번 하면 생성돼요."); showView("ai"); return; }
+  State.listen2 = { items, index: 0, correct: 0, mode: "dictation" };
+  document.getElementById("lmode-dict").classList.add("active");
+  document.getElementById("lmode-choice").classList.remove("active");
+  showListen2();
+}
+function setListenMode(mode) {
+  if (!State.listen2) return;
+  State.listen2.mode = mode;
+  document.getElementById("lmode-dict").classList.toggle("active", mode === "dictation");
+  document.getElementById("lmode-choice").classList.toggle("active", mode === "choice");
+  showListen2();
+}
+function showListen2() {
+  const S = State.listen2, it = S.items[S.index];
+  if (!it) { showListenComplete(); return; }
+  document.getElementById("listen-progress").textContent = `${S.index + 1} / ${S.items.length}`;
+  document.getElementById("listen-result2").style.display = "none";
+  document.getElementById("listen-hint-text").textContent = "";
+  const dict = document.getElementById("listen-dict"), choice = document.getElementById("listen-choice");
+  if (S.mode === "choice") {
+    dict.style.display = "none"; choice.style.display = "";
+    const others = S.items.filter((_, i) => i !== S.index).map(x => x.kr);
+    S.opts = shuffleArr([it.kr, ...shuffleArr(others).slice(0, 3)]);
+    choice.innerHTML = S.opts.map((o, i) =>
+      `<button class="quiz-option" onclick="pickListenChoice(${i})">${escapeHtml(o)}</button>`).join("");
+  } else {
+    choice.style.display = "none"; dict.style.display = "";
+    const inp = document.getElementById("listen-input2");
+    inp.value = ""; inp.disabled = false;
+    inp.onkeydown = e => { if (e.key === "Enter") checkListen2(); };
+    const btn = document.getElementById("listen-check2");
+    btn.textContent = "확인"; btn.onclick = checkListen2;
+  }
+  listenPlayNow(1);   // 들어오면 한 번 재생
+}
+function listenPlayNow(rate) {
+  const S = State.listen2, it = S && S.items[S.index];
+  if (it) speakRate(it.jp, rate);
+}
+function listenHint() {
+  const S = State.listen2, it = S && S.items[S.index];
+  if (it) document.getElementById("listen-hint-text").textContent = "뜻: " + it.kr;
+}
+function revealListen(ok) {
+  const S = State.listen2, it = S.items[S.index];
+  if (ok) S.correct++;
+  const r = document.getElementById("listen-result2");
+  r.style.display = "block";
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="reveal-front" style="font-size:20px">${escapeHtml(it.jp)}</div>
+    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>
+    <button class="quiz-next-btn" style="margin-top:10px" onclick="listenAdvance()">${S.index >= S.items.length - 1 ? "결과 보기 →" : "다음 →"}</button>`;
+}
+function listenAdvance() { State.listen2.index++; showListen2(); }
+function checkListen2() {
+  const S = State.listen2, it = S.items[S.index];
+  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
+  document.getElementById("listen-input2").disabled = true;
+  revealListen(norm(document.getElementById("listen-input2").value) === norm(it.jp));
+}
+function pickListenChoice(i) {
+  const S = State.listen2, it = S.items[S.index];
+  document.querySelectorAll("#listen-choice .quiz-option").forEach(b => b.classList.add("disabled"));
+  revealListen(S.opts[i] === it.kr);
+}
+function showListenComplete() {
+  document.getElementById("listen-body").style.display = "none";
+  document.getElementById("listen-complete").style.display = "flex";
+  const t = State.listen2.items.length, c = State.listen2.correct;
+  document.getElementById("listen-total2").textContent = t;
+  document.getElementById("listen-correct2").textContent = c;
+  document.getElementById("listen-acc2").textContent = (t ? Math.round(c / t * 100) : 0) + "%";
+}
+
+// ══════════════════════════════════════════════════════════
 //  공통 유틸
 // ══════════════════════════════════════════════════════════
 
@@ -882,12 +2356,447 @@ async function apiFetch(path, method = "GET", body = null) {
 
   try {
     const res = await fetch(API + path, opts);
+    if (res.status === 401) { showLogin(); return {}; }   // 비밀번호 게이트
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
     console.error(`API 오류 [${path}]:`, e);
     return {};
   }
+}
+
+// ── 비밀번호 게이트 (서버에 APP_PASSWORD 설정 시) ──
+function showLogin() {
+  const el = document.getElementById("login-overlay");
+  if (el) { el.style.display = "flex"; setTimeout(() => document.getElementById("login-pw").focus(), 60); }
+}
+async function doLogin() {
+  const pw = document.getElementById("login-pw").value;
+  const err = document.getElementById("login-error");
+  err.textContent = "";
+  try {
+    const res = await fetch(API + "/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (res.ok) { document.getElementById("login-overlay").style.display = "none"; location.reload(); }
+    else { err.textContent = "비밀번호가 틀렸어요."; }
+  } catch (e) { err.textContent = "연결 오류"; }
+}
+
+// ── TTS 발음 (가나 기반으로 정확하게) ──────────────────
+// 같은 텍스트가 짧은 시간 내 두 번 들어오면 무시 (UI 핸들러 중복 호출에서 발생하는 겹침 방지)
+let _lastSpeakText = "", _lastSpeakAt = 0;
+function _dupSpeak(text) {
+  const now = Date.now();
+  if (text === _lastSpeakText && now - _lastSpeakAt < 1200) return true;
+  _lastSpeakText = text; _lastSpeakAt = now;
+  return false;
+}
+function speak(text) {
+  if (!text || _dupSpeak(text)) return;
+  // APK: 네이티브 일본어 TTS (WebView speechSynthesis 보다 안정적)
+  if (window.AndroidTTS && window.AndroidTTS.speak) {
+    try { window.AndroidTTS.speak(text); return; } catch (e) {}
+  }
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP";
+  u.rate = 0.9;
+  window.speechSynthesis.speak(u);
+}
+
+// 속도 조절 발음 (듣기 연습 '느리게'). 네이티브 speakRate 우선, 없으면 보통/웹.
+function speakRate(text, rate) {
+  if (!text || _dupSpeak(text + "@" + rate)) return;
+  if (window.AndroidTTS && window.AndroidTTS.speakRate) {
+    try { window.AndroidTTS.speakRate(text, rate); return; } catch (e) {}
+  }
+  if (window.AndroidTTS && window.AndroidTTS.speak) {
+    try { window.AndroidTTS.speak(text); return; } catch (e) {}   // 구버전 네이티브: 보통 속도
+  }
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ja-JP";
+  u.rate = rate;
+  window.speechSynthesis.speak(u);
+}
+
+// 후리가나 괄호 제거: 鈴木(すずき) → 鈴木
+function stripFurigana(s) {
+  return (s || "").replace(/[（(][ぁ-んァ-ヴー・]+[）)]/g, "");
+}
+
+// 카드 타입별로 TTS에 넘길 텍스트(가능하면 가나)를 만든다
+function cardTTSText(card) {
+  if (!card) return "";
+  if (card.type === "kanji") {
+    // 읽기를 여러 개 이어 읽으면(ひと、じん…) 헷갈리므로 '가장 많이 쓰는 읽기 하나'만 읽는다
+    const rows = READING_FREQ[card.front];
+    if (rows && rows.length) {
+      const top = rows.slice().sort((a, b) => b.p - a.p)[0];
+      return top.r.replace(/[（）()]/g, "") || card.front;   // 送りがな 괄호 합쳐 자연스럽게
+    }
+    // 데이터 없으면: 첫 음독, 없으면 첫 훈독 하나
+    const r = card.back_reading || "";
+    const clean = s => (s.split("・")[0] || "").replace(/[*\-]/g, "").replace(/[（）()]/g, "").trim();
+    const onM = r.match(/음독:\s*([^/]+)/);
+    const kunM = r.match(/훈독:\s*(.+)/);
+    const one = (onM && clean(onM[1])) || (kunM && clean(kunM[1])) || "";
+    return one || card.front;
+  }
+  if (card.type === "grammar") {
+    // 화면에 보이는 패턴을 그대로 읽는다: 괄호 주석·물결표·한글 제거 후 일본어(가나·한자)만
+    const jp = (card.front || "")
+      .replace(/[（(][^）)]*[）)]/g, "")                 // (ない형) 등 괄호 주석 제거
+      .replace(/[~～]/g, "")                             // 물결표 제거 (～て → て)
+      .replace(/[^぀-ヿ一-龯]/g, "");   // 일본어만 남김 (한글 주석 제거)
+    if (jp) return jp;
+    // 일본어가 없는 순수 한글 라벨(자동사·가능형 등)일 때만 예문으로 대체
+    const ex = card.extra_info && card.extra_info.examples && card.extra_info.examples[0];
+    return ex ? stripFurigana(ex.jp) : card.front;
+  }
+  return card.back_reading || card.front;   // 단어: 루비(가나) 우선
+}
+
+function speakCurrentCard() {
+  speak(cardTTSText(State.study.queue[State.study.index]));
+}
+
+// ── AI 설명 (Gemini) ───────────────────────────────────
+function onGeminiKey(value) {
+  State.settings.gemini_api_key = value.trim();
+}
+
+async function aiExplainCurrent() {
+  const card = State.study.queue[State.study.index];
+  if (!card) return;
+  aiExplain(card.id, card.front);
+}
+
+async function aiExplain(cardId, label) {
+  const overlay = document.getElementById("ai-overlay");
+  const body = document.getElementById("ai-body");
+  document.getElementById("ai-sub").textContent = label || "";
+  body.innerHTML = '<div class="spinner"></div>';
+  overlay.classList.add("open");
+
+  let acc = "";
+  const render = () => {
+    body.innerHTML = `<div class="ai-text">${escapeHtml(acc).replace(/\n/g, "<br>")}</div>`;
+  };
+
+  try {
+    const res = await fetch(API + "/api/ai/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_id: cardId }),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let obj;
+        try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (obj.error) { body.innerHTML = `<div class="ai-error">${escapeHtml(obj.error)}</div>`; return; }
+        if (obj.t) { acc += obj.t; render(); }
+      }
+    }
+    if (!acc.trim()) body.innerHTML = '<div class="ai-error">응답이 비어 있어요. 잠시 후 다시 시도해 주세요.</div>';
+  } catch (e) {
+    body.innerHTML = `<div class="ai-error">연결 오류: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function closeAI() {
+  document.getElementById("ai-overlay").classList.remove("open");
+}
+
+// ── AI 허브 도구 (작문 첨삭 / 약점 리포트 / …) ───────────
+async function openAITool(kind) {
+  const ov = document.getElementById("ai-tool-overlay");
+  const form = document.getElementById("ai-tool-form");
+  const body = document.getElementById("ai-tool-body");
+  form.innerHTML = "";
+  body.innerHTML = "";
+
+  if (kind === "weakness") {
+    document.getElementById("ai-tool-title").textContent = "📊 약점 리포트";
+    document.getElementById("ai-tool-sub").textContent = "복습 이력 분석";
+    ov.classList.add("open");
+    streamInto("/api/ai/weakness", {}, body);
+  } else if (kind === "correct") {
+    document.getElementById("ai-tool-title").textContent = "📝 작문 첨삭";
+    document.getElementById("ai-tool-sub").textContent = "일본어로 한 문장 써보세요";
+    form.innerHTML = `
+      <input id="ai-correct-topic" class="ai-key-input" style="margin-bottom:8px" placeholder="주제(선택) 예: 내 취미"/>
+      <textarea id="ai-correct-text" class="lyrics-textarea" style="min-height:90px;margin:0" placeholder="여기에 일본어 문장을 쓰세요"></textarea>
+      <button class="save-btn" style="margin-top:8px" onclick="submitCorrect()">✏️ 첨삭받기</button>`;
+    ov.classList.add("open");
+  } else if (kind === "listen") {
+    document.getElementById("ai-tool-title").textContent = "🎧 듣기 받아쓰기";
+    document.getElementById("ai-tool-sub").textContent = "문장을 듣고 받아써 보세요";
+    ov.classList.add("open");
+    body.innerHTML = '<div class="spinner"></div>';
+    const data = await apiFetch("/api/ai/sentences", "POST", {});
+    State.listen.items = (data.sentences || []).filter(s => s.jp);
+    State.listen.idx = 0;
+    if (!State.listen.items.length) {
+      body.innerHTML = '<div class="ai-error">문장이 아직 없어요. 학습을 한 번 하면 자동 생성돼요.</div>';
+      return;
+    }
+    renderListen();
+  } else {
+    openChat();
+  }
+}
+
+function renderListen() {
+  const body = document.getElementById("ai-tool-body");
+  body.innerHTML = `
+    <button class="tts-btn" style="margin:0 auto 12px;display:block" onclick="listenPlay()">🔊 다시 듣기</button>
+    <textarea id="listen-input" class="lyrics-textarea" style="min-height:70px;margin:0" placeholder="들은 문장을 입력하세요"></textarea>
+    <button class="save-btn" style="margin-top:8px" onclick="checkListen()">확인</button>
+    <div id="listen-result"></div>`;
+  listenPlay();
+}
+function listenPlay() { speak(State.listen.items[State.listen.idx].jp); }
+function checkListen() {
+  const it = State.listen.items[State.listen.idx];
+  const norm = s => (s || "").replace(/[\s、。,.！!？?]/g, "");
+  const ok = norm(document.getElementById("listen-input").value) === norm(it.jp);
+  const r = document.getElementById("listen-result");
+  r.className = "quiz-reveal " + (ok ? "ok" : "ng");
+  r.style.display = "block";
+  r.innerHTML = `
+    <div class="reveal-mark">${ok ? "⭕ 정답!" : "❌ 다시 보기"}</div>
+    <div class="reveal-front" style="font-size:22px">${escapeHtml(it.jp)}</div>
+    <div class="reveal-meaning">${escapeHtml(it.kr)}</div>
+    <button class="quiz-next-btn" style="margin-top:10px" onclick="listenNext()">다음 문장 →</button>`;
+}
+function listenNext() {
+  State.listen.idx = (State.listen.idx + 1) % State.listen.items.length;
+  renderListen();
+}
+
+function submitCorrect() {
+  const text = document.getElementById("ai-correct-text").value.trim();
+  const topic = document.getElementById("ai-correct-topic").value.trim();
+  if (!text) { showToast("문장을 입력해 주세요"); return; }
+  streamInto("/api/ai/correct", { text, topic }, document.getElementById("ai-tool-body"));
+}
+
+function closeAITool() {
+  document.getElementById("ai-tool-overlay").classList.remove("open");
+}
+
+// ── AI 회화 (채팅) ─────────────────────────────────────
+function openChat() {
+  showView("ai-chat");
+  if (State.chat.history.length === 0) {
+    document.getElementById("chat-messages").innerHTML = "";
+    addChatBubble("model", "こんにちは！🌸\n안녕하세요! 일본어로 편하게 말 걸어보세요. 제가 도와드릴게요.");
+  }
+}
+
+function scrollChat() {
+  const w = document.getElementById("chat-messages");
+  w.scrollTop = w.scrollHeight;
+}
+
+function addChatBubble(role, text) {
+  const b = document.createElement("div");
+  b.className = "chat-bubble " + role;
+  b.innerHTML = escapeHtml(text).replace(/\n/g, "<br>");
+  document.getElementById("chat-messages").appendChild(b);
+  scrollChat();
+  return b;
+}
+
+async function sendChat() {
+  if (State.chat.busy) return;
+  const inp = document.getElementById("chat-input");
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = "";
+  addChatBubble("user", text);
+  State.chat.history.push({ role: "user", text });
+  State.chat.busy = true;
+
+  const el = addChatBubble("model", "…");
+  let acc = "";
+  try {
+    const res = await fetch(API + "/api/ai/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history: State.chat.history }),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let o; try { o = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (o.error) { el.textContent = o.error; el.classList.add("err"); State.chat.busy = false; return; }
+        if (o.t) { acc += o.t; el.innerHTML = escapeHtml(acc).replace(/\n/g, "<br>"); scrollChat(); }
+      }
+    }
+    if (acc.trim()) State.chat.history.push({ role: "model", text: acc });
+    else el.textContent = "응답이 비어 있어요.";
+  } catch (e) {
+    el.textContent = "연결 오류: " + e;
+  }
+  State.chat.busy = false;
+  scrollChat();
+}
+
+// ── 번역 ───────────────────────────────────────────────
+let translateImage = null;   // {data: base64, mime}
+
+// 첨부 이미지를 캔버스로 축소(최대 1024px) 후 base64 보관 → 페이로드 가볍게
+function pickTranslateImage(input) {
+  const f = input.files && input.files[0];
+  input.value = "";   // 같은 파일 다시 선택 가능하게
+  if (!f) return;
+  const img = new Image();
+  const url = URL.createObjectURL(f);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const max = 1024;
+    let w = img.width, h = img.height;
+    if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(img, 0, 0, w, h);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+    translateImage = { data: dataUrl.split(",")[1], mime: "image/jpeg" };
+    const p = document.getElementById("translate-img-preview");
+    p.style.display = "flex";
+    p.innerHTML = `<img src="${dataUrl}" alt="첨부 이미지">
+      <button class="translate-img-x" onclick="clearTranslateImage()">✕ 제거</button>`;
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); showToast("이미지를 불러오지 못했어요"); };
+  img.src = url;
+}
+function clearTranslateImage() {
+  translateImage = null;
+  const p = document.getElementById("translate-img-preview");
+  p.innerHTML = ""; p.style.display = "none";
+}
+
+function doTranslate() {
+  const text = document.getElementById("translate-input").value.trim();
+  if (!text && !translateImage) { showToast("문장을 입력하거나 이미지를 첨부해 주세요"); return; }
+  const payload = { text };
+  if (translateImage) { payload.image = translateImage.data; payload.image_mime = translateImage.mime; }
+  streamInto("/api/ai/translate", payload, document.getElementById("translate-result"));
+}
+
+function resetTranslate() {
+  document.getElementById("translate-input").value = "";
+  document.getElementById("translate-result").innerHTML = "";
+  clearTranslateImage();
+  document.getElementById("translate-input").focus();
+}
+
+// 번역 결과 텍스트를 결과 영역에 표시 (스트림과 동일 형식)
+function renderTranslateText(text) {
+  document.getElementById("translate-result").innerHTML =
+    `<div class="ai-text">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`;
+}
+
+async function openTranslateHistory() {
+  await loadTranslateHistory();
+  document.getElementById("translate-history-overlay").classList.add("open");
+}
+function closeTranslateHistory() {
+  document.getElementById("translate-history-overlay").classList.remove("open");
+}
+
+async function loadTranslateHistory() {
+  const wrap = document.getElementById("translate-history-list");
+  const data = await apiFetch("/api/translate/history");
+  const items = data.items || [];
+  wrap.innerHTML = items.length
+    ? items.map(it => {
+        const snip = it.source.length > 22 ? it.source.slice(0, 22) + "…" : it.source;
+        return `
+        <div class="saved-row">
+          <button class="saved-row-open" onclick="openTranslateItem(${it.id})">${escapeHtml(snip)}
+            <span style="color:var(--text-muted);font-weight:400;font-size:12px"> · ${escapeHtml((it.created_at || "").slice(5, 10))}</span></button>
+          <button class="saved-row-del" onclick="confirmDeleteTranslate(${it.id})">🗑</button>
+        </div>`;
+      }).join("")
+    : `<div style="color:var(--text-muted);font-size:13px;padding:24px;text-align:center">저장된 번역 기록이 없어요.</div>`;
+}
+
+async function openTranslateItem(id) {
+  const it = await apiFetch(`/api/translate/history/${id}`);
+  if (it.error) { showToast("불러오기 실패"); return; }
+  document.getElementById("translate-input").value = it.source || "";
+  renderTranslateText(it.result || "");
+  closeTranslateHistory();
+}
+
+function confirmDeleteTranslate(id) {
+  if (confirm("이 기록을 삭제할까요?")) deleteTranslate(id);
+}
+async function deleteTranslate(id) {
+  await apiFetch(`/api/translate/history/delete/${id}`, "POST", {});
+  loadTranslateHistory();
+}
+
+// SSE 스트림을 받아 요소에 점진적으로 렌더 (설명/가사 공용)
+async function streamInto(url, payload, el) {
+  el.innerHTML = '<div class="spinner"></div>';
+  let acc = "";
+  const render = () => { el.innerHTML = `<div class="ai-text">${escapeHtml(acc).replace(/\n/g, "<br>")}</div>`; };
+  try {
+    const res = await fetch(API + url, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+        let obj; try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        if (obj.error) { el.innerHTML = `<div class="ai-error">${escapeHtml(obj.error)}</div>`; return; }
+        if (obj.t) { acc += obj.t; render(); }
+      }
+    }
+    if (!acc.trim()) el.innerHTML = '<div class="ai-error">응답이 비어 있어요.</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="ai-error">연결 오류: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function aiLyrics() {
+  const text = document.getElementById("lyrics-input").value.trim();
+  if (!text) { showToast("가사를 입력해 주세요!"); return; }
+  await streamInto("/api/ai/lyrics", { text }, document.getElementById("lyrics-results"));
 }
 
 function escapeHtml(s) {

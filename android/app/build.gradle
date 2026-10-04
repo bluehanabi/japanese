@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.kanjiflow.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.kanjiflow.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        debug {
+            // 디버그 APK는 자동 디버그 키로 서명됨 → 사이드로드 설치 가능
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 카메라 촬영 결과를 받기 위한 FileProvider 제공
+    implementation 'androidx.core:core:1.13.1'
+}
