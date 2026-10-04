@@ -1,6 +1,6 @@
 """
 Kanji Flow 2.0 - Flask 백엔드 서버
-포트 8005로 실행
+포트 8006으로 실행 (8005 는 한자 v3 앱 — 폰 앱이 8005 를 보므로)
 """
 import json
 import os
@@ -1686,12 +1686,12 @@ def _backup_loop():
         time.sleep(24 * 3600)
 
 
-V3_PORT = 8006
+V3_PORT = 8005
 V3_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kanji-v3", "web")
 
 
 def _serve_v3():
-    """한자 v3(정적 PWA)를 8006 포트로 같이 띄운다. 폴더가 없으면 건너뜀."""
+    """한자 v3(정적 PWA)를 8005 포트로 같이 띄운다. 폴더가 없으면 건너뜀."""
     if not os.path.isdir(V3_DIR):
         return
     import functools
@@ -1721,5 +1721,5 @@ if __name__ == "__main__":
     init_db()
     threading.Thread(target=_backup_loop, daemon=True).start()
     threading.Thread(target=_serve_v3, daemon=True).start()
-    print(f"[서버] http://0.0.0.0:8005 에서 실행 중 (자동 백업: {BACKUP_DIR}/)")
-    app.run(host="0.0.0.0", port=8005, debug=False)
+    print(f"[서버] http://0.0.0.0:8006 에서 실행 중 (자동 백업: {BACKUP_DIR}/)")
+    app.run(host="0.0.0.0", port=8006, debug=False)

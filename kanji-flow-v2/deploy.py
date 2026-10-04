@@ -49,7 +49,7 @@ def main():
         # 1) 기존 서버 프로세스 종료
         print("\n[2] 기존 서버 프로세스 종료...")
         run_ssh(client, "pkill -f 'python.*server.py' || true", "기존 서버 종료")
-        run_ssh(client, "fuser -k 8005/tcp || true", "포트 8005 강제 해제")
+        run_ssh(client, "fuser -k 8005/tcp; fuser -k 8006/tcp || true", "포트 8005 강제 해제")
 
         # 2) 디렉토리 생성
         print("\n[3] 디렉토리 생성...")
@@ -80,7 +80,7 @@ def main():
             "DB 초기화")
 
         # 6) 서버 백그라운드 기동
-        print("\n[7] 서버 기동 (포트 8005)...")
+        print("\n[7] 서버 기동 (포트 8006)...")
         run_ssh(client,
             f"cd {REMOTE_DIR} && nohup python3 server.py > /tmp/kanji-flow.log 2>&1 &",
             "서버 시작")
@@ -89,14 +89,14 @@ def main():
         time.sleep(3)
 
         # 7) 확인
-        out = run_ssh(client, "curl -s http://localhost:8005/api/stats | python3 -c \"import sys,json; d=json.load(sys.stdin); print(f'총 카드: {d[\\\"total_cards\\\"]}개')\" 2>&1", "API 응답 확인")
+        out = run_ssh(client, "curl -s http://localhost:8006/api/stats | python3 -c \"import sys,json; d=json.load(sys.stdin); print(f'총 카드: {d[\\\"total_cards\\\"]}개')\" 2>&1", "API 응답 확인")
 
         run_ssh(client, "tail -5 /tmp/kanji-flow.log", "서버 로그")
 
         print("\n" + "=" * 55)
         print("  ✅ 배포 완료!")
-        print(f"  🌐 http://192.168.10.35:8005")
-        print(f"  🌐 http://211.109.91.64:8005 (외부)")
+        print(f"  🌐 http://192.168.10.35:8005 (새 앱) / :8006 (기존)")
+        print(f"  🌐 http://211.109.91.64:8005 (외부, 새 앱)")
         print("=" * 55)
 
     except Exception as e:

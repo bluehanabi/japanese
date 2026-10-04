@@ -72,7 +72,7 @@ EOF
 # 기존 작업 내리고, 옛 방식(nohup)으로 떠 있던 잔여 서버 정리 후, 새로 올린다
 launchctl unload "$SERVER_PLIST" 2>/dev/null || true
 launchctl unload "$DEPLOY_PLIST" 2>/dev/null || true
-lsof -ti tcp:8005 2>/dev/null | xargs kill -9 2>/dev/null || true
+lsof -ti tcp:8005 tcp:8006 2>/dev/null | xargs kill -9 2>/dev/null || true
 launchctl load "$SERVER_PLIST"
 launchctl load "$DEPLOY_PLIST"
 

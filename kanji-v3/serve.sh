@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 한자 v3 — 정적 파일 서버 (맥북에서 실행). 포트 8006.
+# 한자 v3 — 정적 파일 서버 (맥북에서 실행). 포트 8005.
 # 사용법:  bash serve.sh          (포그라운드)
 #          bash serve.sh --bg     (백그라운드, nohup)
 set -e
 cd "$(dirname "$0")/web"
-PORT=8006
+PORT=8005
 
 PYTHON="${PYTHON:-}"
 if [ -z "$PYTHON" ]; then

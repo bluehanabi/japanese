@@ -292,7 +292,7 @@ function viewSettings() {
       <button class="btn ghost" data-act="export">백업 파일 저장</button>
       <label class="btn ghost mt" style="display:block;text-align:center">백업 파일 불러오기<input type="file" id="imp" accept="application/json" hidden></label></div>
     <h2>다른 앱</h2>
-    <a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="${location.protocol}//${location.hostname}:8005/">Kanji Flow (기존 앱) 열기 →</a>
+    <a class="btn ghost" style="display:block;text-align:center;text-decoration:none" href="${location.protocol}//${location.hostname}:8006/">Kanji Flow (기존 앱) 열기 →</a>
     <h2>기타</h2>
     <button class="btn ghost" data-act="reset" style="color:var(--warn)">모든 기록 지우기</button>`;
 }

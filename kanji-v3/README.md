@@ -10,7 +10,7 @@
 - 기능은 오늘 / 쓰기 / 목록 / 설정 네 가지뿐.
 
 ## 배포
-Kanji Flow v2 서버(`kanji-flow-v2/server.py`)가 8005(기존 앱)와 함께 **8006(이 앱)** 을 같이 띄웁니다.
+Kanji Flow v2 서버(`kanji-flow-v2/server.py`)가 **8005(이 앱 — 폰 앱이 보는 주소)** 와 8006(기존 Kanji Flow)을 같이 띄웁니다.
 맥의 launchd 자동배포가 `claude/gallant-albattani-XvrfY` 브랜치를 1분마다 받아 서버를 재시작하므로 별도 설정이 없습니다.
 두 앱은 설정 화면에서 서로 링크됩니다.
 

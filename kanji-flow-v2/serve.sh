@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")"
 
-PORT=8005
+PORT=8006
 
 # 비밀번호 게이트: .app_password 파일이 있으면 자동 적용 (깃에 안 올라감, launchd/수동 모두 동작)
 if [ -z "$APP_PASSWORD" ] && [ -f .app_password ]; then
@@ -38,8 +38,8 @@ if lsof -ti tcp:$PORT >/dev/null 2>&1; then
   echo "[serve] 포트 $PORT 사용 중인 기존 프로세스 종료..."
   lsof -ti tcp:$PORT | xargs kill -9 2>/dev/null || true
 fi
-# 한자 v3(8006)는 server.py 가 같이 띄운다 — 예전에 따로 띄운 http.server 가 있으면 정리
-lsof -ti tcp:8006 2>/dev/null | xargs kill -9 2>/dev/null || true
+# 한자 v3(8005)는 server.py 가 같이 띄운다 — 예전 앱/http.server 가 8005 를 잡고 있으면 정리
+lsof -ti tcp:8005 2>/dev/null | xargs kill -9 2>/dev/null || true
 pkill -f "[s]erver.py" 2>/dev/null || true   # 예전 경로/방식으로 떠 있던 잔여 프로세스 정리
 sleep 1
 
