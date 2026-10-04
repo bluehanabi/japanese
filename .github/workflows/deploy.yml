@@ -39,4 +39,6 @@ jobs:
             echo "배포 완료: http://192.168.10.35:8005"
             cd ~/japanese/kanji-v3
             bash serve.sh --bg
+            sleep 2
+            curl -s -o /dev/null -w "v3 상태: HTTP %{http_code}\n" http://127.0.0.1:8006/ || echo "v3 서버 응답 없음"
             echo "한자 v3 배포 완료: http://192.168.10.35:8006"
