@@ -1,5 +1,5 @@
 // 오프라인 지원: 앱 파일은 캐시에서 먼저 보여주고, 뒤에서 새 버전을 받아 둔다.
-const CACHE = 'kanji-v3-3';
+const CACHE = 'kanji-v3-5';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'data/kanji.json'];
 
 self.addEventListener('install', e => {

@@ -62,10 +62,13 @@ function newCard(id, ch, extra) {
   S.cards[id] = Object.assign({ ch, due: today(), ivl: 0, ease: 2.3, reps: 0, lapses: 0 }, extra || {});
 }
 function rate(card, q) {         // q: 1 모름, 2 애매, 3 알아요
-  if (q === 1) { card.ease = Math.max(1.3, card.ease - 0.2); card.lapses++; card.reps = 0; card.ivl = 0; card.due = today(); return; }
-  if (q === 2) { card.ease = Math.max(1.3, card.ease - 0.1); card.ivl = Math.max(1, Math.round((card.ivl || 1) * 1.2)); }
-  else {
-    card.ivl = card.reps === 0 ? 1 : card.reps === 1 ? 3 : Math.max(card.ivl + 1, Math.round(card.ivl * card.ease));
+  card.last = q;
+  if (q === 1) {                 // 모름: 내일 다시 (이번 세션에서는 한 번만 재확인)
+    card.ease = Math.max(1.3, card.ease - 0.2); card.lapses++; card.reps = 0; card.ivl = 1;
+  } else if (q === 2) {          // 애매: 간격을 줄여서 2일~ 뒤에 다시
+    card.ease = Math.max(1.3, card.ease - 0.1); card.ivl = Math.max(2, Math.round((card.ivl || 1) * 0.6));
+  } else {                       // 알아요: 점점 늘어남 (모름을 겪은 카드는 2일부터)
+    card.ivl = card.reps === 0 ? (card.lapses > 0 ? 2 : 1) : card.reps === 1 ? 3 : Math.max(card.ivl + 1, Math.round(card.ivl * card.ease));
     card.reps++;
   }
   card.due = today() + card.ivl;
@@ -74,7 +77,7 @@ function learnKanji(i) {
   const x = K[i];
   S.k[i] = { d: today() };
   newCard('k:' + x.c, x.c, { kind: 'k' });
-  x.w.slice(0, 3).forEach((w, wi) => newCard('w:' + w[0], x.c, { kind: 'w', wi }));
+  x.w.slice(0, 3).forEach((w, wi) => { if (!S.cards['w:' + w[0]]) newCard('w:' + w[0], x.c, { kind: 'w', wi }); });
 }
 function markKnown(i) {
   const x = K[i];
@@ -98,6 +101,7 @@ function viewToday() {
   const learned = Object.keys(S.k).length;
   const solid = K.filter((_, i) => kanjiState(i) === 'good').length;
   const empty = due === 0 && nNew === 0;
+  const weak = weakCounts();
   $('#app').innerHTML = `
     <h1>오늘의 한자</h1>
     <div class="stats">
@@ -105,6 +109,7 @@ function viewToday() {
       <div class="card"><div class="big-num">${nNew}</div><div class="muted">새 한자</div></div>
     </div>
     <button class="btn" data-act="start" ${empty ? 'disabled' : ''}>${empty ? '오늘 할 일 끝 🎉' : '시작하기'}</button>
+    ${weak.no + weak.so ? `<button class="btn ghost mt" data-act="weak">약한 카드만 복습 · 모름 ${weak.no} / 애매 ${weak.so}</button>` : ''}
     <div class="card mt">
       <div class="row between"><b>진행</b><span class="muted">${learned} / ${K.length}자 만남 · ${solid}자 익숙</span></div>
       <div class="bar mt"><i style="width:${(learned / K.length * 100).toFixed(1)}%"></i></div>
@@ -113,9 +118,23 @@ function viewToday() {
 }
 
 // ───────────────────────── 학습 세션 ─────────────────────────
+// 약한 카드부터: 모름 → 애매 → 나머지, 각 묶음 안에서는 무작위
+function byWeakness(ids) {
+  const tier = id => (S.cards[id].last === 1 ? 0 : S.cards[id].last === 2 ? 1 : 2);
+  return [0, 1, 2].flatMap(n => shuffle(ids.filter(id => tier(id) === n)));
+}
+const weakCounts = () => {
+  const cs = Object.values(S.cards);
+  return { no: cs.filter(c => c.last === 1).length, so: cs.filter(c => c.last === 2).length };
+};
+function startWeak() {
+  const ids = byWeakness(Object.keys(S.cards).filter(id => S.cards[id].last === 1 || S.cards[id].last === 2));
+  sess = { q: ids.map(id => ({ t: 'c', id })), total: ids.length, done: 0, reveal: false };
+  nextStep();
+}
 function startSession(extraNew) {
   const t = today();
-  const dueIds = shuffle(Object.keys(S.cards).filter(id => S.cards[id].due <= t));
+  const dueIds = byWeakness(Object.keys(S.cards).filter(id => S.cards[id].due <= t));
   const quota = extraNew != null ? extraNew : Math.max(0, S.set.newPerDay - logToday().new);
   const newIdx = K.map((_, i) => i).filter(i => !S.k[i]).slice(0, quota);
   sess = { q: [...dueIds.map(id => ({ t: 'c', id })), ...newIdx.map(i => ({ t: 'i', i }))], total: 0, done: 0, reveal: false };
@@ -185,9 +204,17 @@ function viewCard(id) {
 
 function answer(q) {
   const it = sess.q.shift(), c = S.cards[it.id];
-  rate(c, q);
-  logToday().rev++;
-  if (q === 1) sess.q.push(it); else sess.done++;   // 모름은 이번 세션 끝에 다시
+  if (it.retry) {                // 재확인: 일정은 그대로 두고 한 번 더 봤다는 것만 기록
+    if (q === 1) c.last = 1;
+    sess.done++;
+  } else {
+    rate(c, q);
+    logToday().rev++;
+    if (q === 1) {               // 모름: 카드 몇 장 뒤에 딱 한 번만 다시
+      it.retry = true;
+      sess.q.splice(Math.min(sess.q.length, 5), 0, it);
+    } else sess.done++;
+  }
   save(); nextStep();
 }
 
@@ -320,6 +347,7 @@ document.addEventListener('click', e => {
   if (d.q) return answer(+d.q);
   switch (d.act) {
     case 'start': startSession(); break;
+    case 'weak': startWeak(); break;
     case 'more': startSession(5); break;
     case 'home': tab = 'today'; render(); break;
     case 'quit': sess = null; $('#tabs').classList.remove('hide'); render(); break;

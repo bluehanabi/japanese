@@ -351,6 +351,12 @@ for ch, d in chars.items():
                 chosen.append(w)
             if len(chosen) >= 2:
                 break
+    uniq, seen_txt = [], set()          # 같은 표기(何: なに/なん)는 한 번만
+    for w in chosen:
+        if w["w"] not in seen_txt:
+            seen_txt.add(w["w"])
+            uniq.append(w)
+    chosen = uniq
     word_out = []
     for w in chosen:
         disp = None
